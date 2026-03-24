@@ -10,6 +10,8 @@ import time
 import csv
 import io
 
+
+
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
     options = webdriver.ChromeOptions()
