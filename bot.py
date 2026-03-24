@@ -1,9 +1,9 @@
+import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
@@ -11,21 +11,15 @@ import time
 import csv
 import io
 
-# ================= TELEGRAM TOKEN =================
-TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
-
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
-    options = Options()
+    options = webdriver.ChromeOptions()
+    # Use headless Chrome
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.binary_location = "/usr/bin/chromium"  # Linux Chromium path
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options
-    )
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 10)
 
     driver.get("https://www.bsebexam.com/")
@@ -42,14 +36,13 @@ def get_bseb_result(roll_code, roll_no):
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
     driver.execute_script("document.getElementById('resultForm').submit()")
 
-    time.sleep(2)  # wait for page to load
+    time.sleep(2)
     html = driver.page_source
     driver.quit()
 
     # Parse results
     soup = BeautifulSoup(html, "html.parser")
 
-    # Student info
     student_name = roll_number = aggregate_marks = "N/A"
     for td in soup.find_all("td"):
         text = td.get_text(strip=True)
@@ -60,7 +53,6 @@ def get_bseb_result(roll_code, roll_no):
         elif text == "Aggregate Marks:":
             aggregate_marks = td.find_next_sibling("td").get_text(strip=True)
 
-    # Subject marks
     subjects = []
     marks_table = soup.find("table", {"class": "text_center"})
     if marks_table:
@@ -83,10 +75,9 @@ def get_bseb_result(roll_code, roll_no):
 
 # ================= TELEGRAM BOT HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results.\nExample: /batch 32065 26030001 10"
-    )
+    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                   text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results.\n"
+                                        "Example:\n/batch 32065 26030001 10")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -98,8 +89,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                        text="Usage: /batch <roll_code> <start_roll> <count>")
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Fetching results... This may take some time.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
 
     results = []
     for i in range(count):
@@ -120,15 +110,14 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subject_str])
 
     output.seek(0)
-    await context.bot.send_document(chat_id=update.effective_chat.id,
-                                    document=output,
-                                    filename="bseb_results.csv")
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
 # ================= MAIN BOT =================
 if __name__ == "__main__":
+    import os
+    TOKEN = os.getenv("TOKEN")  # Read token from Railway env variable
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
-
     print("Bot is running...")
-    app.run_polling()  # polling automatically clears previous webhooks
+    app.run_polling()
