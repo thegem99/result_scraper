@@ -1,7 +1,6 @@
 import os
 import time
 import io
-import csv
 import logging
 import pandas as pd
 from telegram import Update
@@ -26,7 +25,7 @@ def get_bseb_result(roll_code, roll_no):
     options.add_argument("--disable-gpu")
     options.binary_location = "/usr/bin/google-chrome"
     
-    # Use system driver for Railway
+    # Force use of system driver
     service = Service("/usr/bin/chromedriver")
     driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 10)
@@ -34,7 +33,7 @@ def get_bseb_result(roll_code, roll_no):
     try:
         driver.get("https://www.bsebexam.com/")
         
-        # Get Captcha
+        # Get Captcha (Direct from dataset as per your working script)
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha').dataset.value"
         ) is not None)
@@ -45,24 +44,23 @@ def get_bseb_result(roll_code, roll_no):
         driver.find_element(By.ID, "rollno").send_keys(str(roll_no))
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
         
-        # Submit
+        # Submit (Direct JS submit as per your working script)
         driver.execute_script("document.getElementById('resultForm').submit()")
-        time.sleep(2) # Brief wait for redirect
+        time.sleep(3) 
 
-        # Check for site errors (SweetAlert)
+        # ===== ERROR CHECK (SweetAlert) =====
         try:
-            error_msg = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
-            return {"Roll No": roll_no, "Status": f"Error: {error_msg}"}
+            error_text = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
+            return {"Roll No": roll_no, "Status": f"❌ {error_text}"}
         except:
             pass
 
-        # Parse Page
+        # ===== PARSE HTML =====
         soup = BeautifulSoup(driver.page_source, "html.parser")
-        
-        student_name = roll_number = aggregate_marks = "N/A"
+        student_name = roll_number = aggregate_marks = None
         subject_data = {}
 
-        # Extract Student Info (Your exact logic)
+        # Student Info Logic
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
             if text == "Student's Name":
@@ -72,7 +70,7 @@ def get_bseb_result(roll_code, roll_no):
             elif text == "Aggregate Marks:":
                 aggregate_marks = td.find_next_sibling("td").get_text(strip=True)
 
-        # Extract Marks (Your exact logic)
+        # Subject Marks Logic (Exact matches your script)
         marks_table = soup.find("table", {"class": "text_center"})
         if marks_table:
             for row in marks_table.find_all("tr")[3:]:
@@ -88,58 +86,65 @@ def get_bseb_result(roll_code, roll_no):
                     subject_data[f"{subject}_Total"] = total
 
         row = {
-            "Roll No": roll_number if roll_number != "N/A" else roll_no,
+            "Roll No": roll_number or roll_no,
             "Student Name": student_name,
             "Aggregate Marks": aggregate_marks
         }
         row.update(subject_data)
         return row
 
+    except Exception as e:
+        logger.error(f"Scraper error for {roll_no}: {e}")
+        return {"Roll No": roll_no, "Status": "Failed to load"}
     finally:
         driver.quit()
 
 # ================= TELEGRAM HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ready. Use: /batch <roll_code> <start_roll> <count>")
+    await update.message.reply_text("BSEB Bot Online. Send /batch <roll_code> <start_roll> <count>")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
-        await update.message.reply_text("Format: /batch 31082 26010001 10")
+        await update.message.reply_text("❌ Usage: /batch 31082 26010001 5")
         return
 
     roll_code = context.args[0]
     start_roll = int(context.args[1])
-    count = min(int(context.args[2]), 50) # Capped at 50 for safety
+    count = min(int(context.args[2]), 25) # Safety cap
 
-    msg = await update.message.reply_text(f"🚀 Starting batch for {count} students...")
+    status_msg = await update.message.reply_text(f"⏳ Processing {count} results... please wait.")
     
     all_results = []
     for i in range(count):
         curr_roll = str(start_roll + i)
-        try:
-            res = get_bseb_result(roll_code, curr_roll)
-            all_results.append(res)
-            logger.info(f"Fetched {curr_roll}")
-        except Exception as e:
-            all_results.append({"Roll No": curr_roll, "Status": "Failed to connect"})
+        res = get_bseb_result(roll_code, curr_roll)
+        all_results.append(res)
+        # Update user every 5 results
+        if (i + 1) % 5 == 0:
+            await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} fetched...")
 
-    # Use Pandas to create CSV (matches your script's style)
+    # Build CSV using Pandas
     df = pd.DataFrame(all_results)
-    csv_buffer = io.BytesIO()
-    df.to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)
+    csv_stream = io.BytesIO()
+    df.to_csv(csv_stream, index=False)
+    csv_stream.seek(0)
 
     await context.bot.send_document(
         chat_id=update.effective_chat.id,
-        document=csv_buffer,
+        document=csv_stream,
         filename=f"BSEB_Results_{roll_code}.csv",
-        caption=f"✅ Processed {len(all_results)} results."
+        caption=f"✅ Finished! Processed {len(all_results)} results."
     )
-    await msg.delete()
+    await status_msg.delete()
 
+# ================= RUNNER =================
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
+
+    print("🚀 Bot starting...")
+    # This prevents the conflict by dropping updates from the "Ghost" instance
     app.run_polling(drop_pending_updates=True)
