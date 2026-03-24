@@ -12,7 +12,7 @@ import io
 import asyncio
 
 # ====================== CONFIG ======================
-TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # your bot token
+TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # hardcoded token
 
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
@@ -27,23 +27,20 @@ def get_bseb_result(roll_code, roll_no):
 
     driver.get("https://www.bsebexam.com/")
 
-    # Get CAPTCHA
     wait.until(lambda d: d.execute_script(
         "return document.getElementById('generatedCaptcha').dataset.value"
     ) is not None)
     captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-    # Fill form
     driver.find_element(By.ID, "rollcode").send_keys(roll_code)
     driver.find_element(By.ID, "rollno").send_keys(roll_no)
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
     driver.execute_script("document.getElementById('resultForm').submit()")
 
-    time.sleep(2)  # wait for page to load
+    time.sleep(2)
     html = driver.page_source
     driver.quit()
 
-    # Parse results
     soup = BeautifulSoup(html, "html.parser")
 
     student_name = roll_number = aggregate_marks = "N/A"
@@ -119,10 +116,10 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
 # ================= MAIN =================
-async def main():
+async def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Clear any webhook conflicts
+    # await delete webhook to prevent conflicts
     await app.bot.delete_webhook()
     print("Webhook cleared.")
 
@@ -130,8 +127,10 @@ async def main():
     app.add_handler(CommandHandler("batch", batch))
 
     print("Bot is running...")
-    await app.run_polling()
+    await app.run_polling(poll_interval=1, timeout=30)
 
+# ================= ENTRY POINT =================
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    import nest_asyncio
+    nest_asyncio.apply()  # fixes "event loop already running" errors
+    asyncio.get_event_loop().run_until_complete(run_bot())
