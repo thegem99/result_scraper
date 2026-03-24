@@ -10,7 +10,14 @@ import time
 import csv
 import io
 
+from telegram import Bot
+import os
 
+
+
+# Remove any webhooks that might conflict
+bot.delete_webhook()
+print("Webhook cleared.")
 
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
@@ -118,6 +125,8 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MAIN BOT =================
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
+    # TOKEN = os.environ.get("TOKEN", "<your_token_here>")
+    bot = Bot(TOKEN)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
