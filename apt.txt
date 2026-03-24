@@ -1,7 +1,5 @@
 google-chrome-stable
 chromium-driver
-google-chrome-stable
-chromium-driver
 libnss3
 libxss1
 libasound2
