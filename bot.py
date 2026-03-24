@@ -19,11 +19,12 @@ def get_bseb_result(roll_code, roll_no):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     
-    # Railway/Nixpacks paths
+    # On Railway with Nixpacks, Chrome is installed here:
     options.binary_location = "/usr/bin/google-chrome"
-    service = Service("/usr/bin/chromedriver")
-
-    driver = webdriver.Chrome(service=service, options=options)
+    
+    # We do NOT use ChromeDriverManager anymore. 
+    # We let Selenium 4.11.2 find the chromedriver installed by Nixpacks.
+    driver = webdriver.Chrome(options=options)
     
     try:
         driver.get("https://www.bsebexam.com/")
@@ -36,33 +37,38 @@ def get_bseb_result(roll_code, roll_no):
         
         captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-        # Fill and Submit
+        # Fill the form
         driver.find_element(By.ID, "rollcode").send_keys(roll_code)
         driver.find_element(By.ID, "rollno").send_keys(roll_no)
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
-        driver.execute_script("document.getElementById('resultForm').submit()")
+        
+        # Submit via click
+        submit_btn = driver.find_element(By.ID, "btnSubmit")
+        submit_btn.click()
 
-        # Wait for result table to appear instead of just sleeping
-        time.sleep(3) 
+        # Wait for page transition
+        time.sleep(3)
         html = driver.page_source
         
-        # Parse HTML
         soup = BeautifulSoup(html, "html.parser")
-        student_name = roll_number = aggregate_marks = "N/A"
+        
+        # --- Extraction Logic ---
+        student_name = "N/A"
+        aggregate_marks = "N/A"
         
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
             if "Student's Name" in text:
                 student_name = td.find_next_sibling("td").get_text(strip=True)
-            elif "Roll Number" in text:
-                roll_number = td.find_next_sibling("td").get_text(strip=True)
             elif "Aggregate Marks" in text:
                 aggregate_marks = td.find_next_sibling("td").get_text(strip=True)
 
         subjects = []
         marks_table = soup.find("table", {"class": "text_center"})
         if marks_table:
-            for row in marks_table.find_all("tr")[3:]:
+            # Skip header rows
+            rows = marks_table.find_all("tr")
+            for row in rows[3:]:
                 cells = row.find_all("td")
                 if len(cells) >= 8:
                     subjects.append({
@@ -71,62 +77,57 @@ def get_bseb_result(roll_code, roll_no):
                     })
 
         return {
-            "Roll No": roll_no, # Return the requested roll if extraction fails
+            "Roll No": roll_no,
             "Name": student_name,
             "Aggregate Marks": aggregate_marks,
             "Subjects": subjects
         }
 
     finally:
-        driver.quit() # CRITICAL: Close browser to save Railway RAM
+        driver.quit() # Crucial for Railway memory management
 
 # ================= TELEGRAM BOT HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Send /batch <roll_code> <start_roll> <count>\nExample: /batch 32065 26030001 5"
-    )
+    await update.message.reply_text("Usage: /batch <roll_code> <start_roll> <count>")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
-        await update.message.reply_text("Usage: /batch <roll_code> <start_roll> <count>")
+        await update.message.reply_text("Usage: /batch 32065 26030001 5")
         return
 
     roll_code = context.args[0]
     start_roll = int(context.args[1])
-    count = min(int(context.args[2]), 20) # Limit to 20 to avoid Railway timeout
+    count = min(int(context.args[2]), 20)
 
-    msg = await update.message.reply_text(f"Processing {count} results... please wait.")
+    await update.message.reply_text(f"Fetching {count} results. Please wait...")
 
     results = []
     for i in range(count):
-        current_roll = str(start_roll + i)
+        curr_roll = str(start_roll + i)
         try:
-            res = get_bseb_result(roll_code, current_roll)
+            res = get_bseb_result(roll_code, curr_roll)
             results.append(res)
         except Exception as e:
-            results.append({"Roll No": current_roll, "Name": "Error", "Aggregate Marks": str(e), "Subjects": []})
+            results.append({"Roll No": curr_roll, "Name": "Error", "Aggregate Marks": str(e), "Subjects": []})
 
-    # CSV Generation
+    # Generate CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Roll No", "Name", "Aggregate Marks", "Subject Marks"])
-    
+    writer.writerow(["Roll No", "Name", "Total Marks", "Subject Details"])
     for r in results:
-        subj_data = ", ".join([f"{s['Subject']}:{s['Total']}" for s in r.get("Subjects", [])])
-        writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subj_data])
+        subj_str = " | ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
+        writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subj_str])
 
     output.seek(0)
     await context.bot.send_document(
         chat_id=update.effective_chat.id,
         document=io.BytesIO(output.getvalue().encode()),
-        filename=f"results_{roll_code}.csv"
+        filename=f"BSEB_{roll_code}.csv"
     )
 
-# ================= MAIN BOT =================
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
-    print("Bot is alive...")
     app.run_polling()
