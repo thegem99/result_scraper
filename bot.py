@@ -160,7 +160,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    TOKEN = os.getenv("TOKEN")
+    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     if not TOKEN:
         print("❌ TOKEN missing!")
         exit(1)
