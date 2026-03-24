@@ -2,6 +2,7 @@ import os
 import time
 import io
 import logging
+import shutil
 import pandas as pd
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
@@ -28,33 +29,33 @@ def get_bseb_result(roll_code, roll_no):
     options.add_argument("--disable-gpu")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    # Path for Chrome/Driver in Nixpacks
-    chrome_bin = "/usr/bin/google-chrome"
-    driver_bin = "/usr/bin/chromedriver"
+    # 1. SMARTER PATH DETECTION FOR NIXPACKS
+    # We look for 'chromium' first as it's the most reliable on Railway
+    chrome_bin = shutil.which("chromium") or shutil.which("google-chrome") or "/usr/bin/chromium"
+    driver_bin = shutil.which("chromedriver") or "/usr/bin/chromedriver"
     
-    # Check if files exist to provide better error messages in logs
-    if not os.path.exists(chrome_bin):
-        logger.error(f"❌ CRITICAL: Chrome binary NOT found at {chrome_bin}")
-    if not os.path.exists(driver_bin):
-        logger.error(f"❌ CRITICAL: Chromedriver NOT found at {driver_bin}")
+    logger.info(f"🔍 System Check - Browser: {chrome_bin} | Driver: {driver_bin}")
 
-    options.binary_location = chrome_bin
-    service = Service(executable_path=driver_bin)
+    if chrome_bin:
+        options.binary_location = chrome_bin
     
+    # 2. INITIALIZE SERVICE
     try:
+        # Use the detected driver path explicitly
+        service = Service(executable_path=driver_bin)
         driver = webdriver.Chrome(service=service, options=options)
     except Exception as e:
         logger.error(f"❌ Selenium failed to start: {e}")
-        return {"Roll No": roll_no, "Status": "Selenium Start Failed"}
+        return {"Roll No": roll_no, "Status": "System Driver Mismatch"}
 
     driver.set_page_load_timeout(30)
     wait = WebDriverWait(driver, 15)
     
     try:
-        logger.info(f"🚀 Scraping {roll_no}...")
+        logger.info(f"🚀 Scraping Roll No: {roll_no}")
         driver.get("https://www.bsebexam.com/")
         
-        # 1. Wait for Captcha Data
+        # 1. Wait for Captcha (Check for the dataset value specifically)
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha')?.dataset?.value"
         ) is not None)
@@ -65,26 +66,27 @@ def get_bseb_result(roll_code, roll_no):
         driver.find_element(By.ID, "rollno").send_keys(str(roll_no))
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
         
-        # 3. Submit
+        # 3. Submit using the internal JS function
         driver.execute_script("document.getElementById('resultForm').submit()")
         
-        # Wait for result page
+        # Give the result page time to render
         time.sleep(5) 
         
         # 4. Parse Results
         soup = BeautifulSoup(driver.page_source, "html.parser")
         
         if "Student's Name" not in driver.page_source:
-            # Check for error alert
+            # Look for error alerts from the site
             try:
-                err = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
-                return {"Roll No": roll_no, "Status": f"Error: {err}"}
+                err_text = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
+                return {"Roll No": roll_no, "Status": f"Site Error: {err_text}"}
             except:
-                return {"Roll No": roll_no, "Status": "Result Page Not Found"}
+                return {"Roll No": roll_no, "Status": "Data Not Found"}
 
         student_name = aggregate_marks = "N/A"
         subject_data = {}
 
+        # Extract info using your working script logic
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
             if text == "Student's Name":
@@ -95,77 +97,82 @@ def get_bseb_result(roll_code, roll_no):
         marks_table = soup.find("table", {"class": "text_center"})
         if marks_table:
             rows = marks_table.find_all("tr")
-            for row in rows[3:]: # Skip header rows
+            for row in rows[3:]: # Skip table headers
                 cells = row.find_all("td")
                 if len(cells) >= 8:
-                    sub = cells[0].get_text(strip=True)
-                    subject_data[f"{sub}_Total"] = cells[7].get_text(strip=True)
+                    sub_name = cells[0].get_text(strip=True)
+                    # We grab the 'Total' column (index 7)
+                    subject_data[f"{sub_name}_Total"] = cells[7].get_text(strip=True)
 
-        result_row = {
+        result = {
             "Roll No": roll_no,
             "Student Name": student_name,
-            "Total Marks": aggregate_marks
+            "Aggregate Marks": aggregate_marks
         }
-        result_row.update(subject_data)
-        logger.info(f"✅ Success for {roll_no}")
-        return result_row
+        result.update(subject_data)
+        logger.info(f"✅ Successfully fetched: {roll_no}")
+        return result
 
     except Exception as e:
-        logger.error(f"❌ Scraper Error: {e}")
-        return {"Roll No": roll_no, "Status": "Timeout or Site Busy"}
+        logger.error(f"❌ Scraper loop error: {e}")
+        return {"Roll No": roll_no, "Status": "Timeout/Error"}
     finally:
         driver.quit()
 
 # ================= TELEGRAM HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("BSEB Bot Ready. Format: /batch 31082 26010001 5")
+    await update.message.reply_text("BSEB Result Scraper Online.\n\nUse: /batch <roll_code> <start_roll> <count>")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
-        await update.message.reply_text("❌ Usage: /batch <rollcode> <start_roll> <count>")
+        await update.message.reply_text("❌ Missing arguments!\nExample: /batch 31082 26010001 5")
         return
 
     roll_code = context.args[0]
     try:
         start_roll = int(context.args[1])
-        count = min(int(context.args[2]), 15)
-    except:
-        await update.message.reply_text("❌ Invalid numbers.")
+        count = min(int(context.args[2]), 20) # Limit to 20 for RAM safety
+    except ValueError:
+        await update.message.reply_text("❌ Start Roll and Count must be numbers.")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Processing {count} results...")
+    status_msg = await update.message.reply_text(f"⏳ Processing {count} results... please wait.")
     
-    results = []
+    all_data = []
     for i in range(count):
-        curr_roll = str(start_roll + i)
-        res = get_bseb_result(roll_code, curr_roll)
-        results.append(res)
+        current_roll = str(start_roll + i)
+        res = get_bseb_result(roll_code, current_roll)
+        all_data.append(res)
         
-        # Update progress
-        if (i+1) % 3 == 0 or i == count-1:
-            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} fetched...")
-            except: pass
+        # Live update in Telegram every 2 results
+        if (i + 1) % 2 == 0 or i == count - 1:
+            try:
+                await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} completed...")
+            except:
+                pass
 
-    # Build CSV using Pandas
-    df = pd.DataFrame(results)
-    output = io.BytesIO()
-    df.to_csv(output, index=False)
-    output.seek(0)
+    # Create CSV using Pandas
+    df = pd.DataFrame(all_data)
+    csv_file = io.BytesIO()
+    df.to_csv(csv_file, index=False)
+    csv_file.seek(0)
 
     await context.bot.send_document(
         chat_id=update.effective_chat.id,
-        document=output,
-        filename=f"BSEB_{roll_code}.csv",
-        caption=f"✅ Done! Processed {len(results)} records."
+        document=csv_file,
+        filename=f"BSEB_Results_{roll_code}.csv",
+        caption=f"✅ Finished! Processed {len(all_data)} records."
     )
     await status_msg.delete()
 
-# ================= RUNNER =================
+# ================= MAIN RUNNER =================
 if __name__ == "__main__":
+    # Your Token
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
+    
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
-
-    print("🚀 Bot starting...")
+    
+    print("🚀 Bot is starting and polling for updates...")
     app.run_polling(drop_pending_updates=True)
