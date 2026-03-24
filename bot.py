@@ -1,46 +1,51 @@
 import os
+import time
+import io
+import csv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-import time
-import csv
-import io
 
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
-    options = webdriver.ChromeOptions()
-    # Use headless Chrome
+    # Configure headless Chrome
+    options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
+    # Use webdriver-manager to automatically get the correct ChromeDriver
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 10)
 
     driver.get("https://www.bsebexam.com/")
 
-    # Get CAPTCHA
+    # Wait for CAPTCHA to be generated
     wait.until(lambda d: d.execute_script(
-        "return document.getElementById('generatedCaptcha').dataset.value"
+        "return document.getElementById('generatedCaptcha')?.dataset?.value"
     ) is not None)
     captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-    # Fill form
+    # Fill the form
     driver.find_element(By.ID, "rollcode").send_keys(roll_code)
     driver.find_element(By.ID, "rollno").send_keys(roll_no)
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
     driver.execute_script("document.getElementById('resultForm').submit()")
 
+    # Wait for page to load
     time.sleep(2)
     html = driver.page_source
     driver.quit()
 
-    # Parse results
+    # Parse HTML with BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
 
     student_name = roll_number = aggregate_marks = "N/A"
@@ -89,7 +94,8 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                        text="Usage: /batch <roll_code> <start_roll> <count>")
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
+    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                   text="Fetching results... This may take some time.")
 
     results = []
     for i in range(count):
@@ -100,7 +106,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             results.append({"Roll No": roll_no, "Name": "Error fetching", "Aggregate Marks": str(e), "Subjects": []})
 
-    # Create CSV in memory
+    # Generate CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
     header = ["Roll No", "Name", "Aggregate Marks", "Subjects"]
@@ -110,14 +116,19 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subject_str])
 
     output.seek(0)
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
+    await context.bot.send_document(chat_id=update.effective_chat.id,
+                                    document=output,
+                                    filename="bseb_results.csv")
 
 # ================= MAIN BOT =================
 if __name__ == "__main__":
-    import os
-    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # Read token from Railway env variable
+    TOKEN = os.getenv("TOKEN")
+    if not TOKEN:
+        raise ValueError("Telegram TOKEN environment variable not set!")
+
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
+
     print("Bot is running...")
     app.run_polling()
