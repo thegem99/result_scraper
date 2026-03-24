@@ -20,31 +20,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Set Environment Variable via code as well for double safety
-os.environ["SE_OFFLINE"] = "true"
-
 def get_bseb_result(roll_code, roll_no):
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--remote-debugging-port=9222") # Helps in containers
     
-    # 1. Force Paths
+    # 1. Force use of Chromium
     chrome_bin = shutil.which("chromium") or "/usr/bin/chromium"
-    driver_bin = shutil.which("chromedriver") or "/usr/bin/chromedriver"
-    
     options.binary_location = chrome_bin
     
-    # 2. Initialize with minimal interference
+    # 2. Force use of Chromedriver
+    driver_bin = shutil.which("chromedriver") or "/usr/bin/chromedriver"
+    
+    logger.info(f"Using Browser: {chrome_bin}")
+    logger.info(f"Using Driver: {driver_bin}")
+
+    # 3. Initialize using the 4.9.0 direct Service method
     try:
         service = Service(executable_path=driver_bin)
-        # Using a direct call to bypass Selenium Manager's discovery logic
         driver = webdriver.Chrome(service=service, options=options)
     except Exception as e:
         logger.error(f"❌ Initialization Failed: {e}")
-        return {"Roll No": roll_no, "Status": "Selenium Driver Error"}
+        return {"Roll No": roll_no, "Status": "Driver Error"}
 
     driver.set_page_load_timeout(30)
     wait = WebDriverWait(driver, 15)
@@ -69,10 +68,9 @@ def get_bseb_result(roll_code, roll_no):
         
         time.sleep(5) 
         
-        # Parse Results
         soup = BeautifulSoup(driver.page_source, "html.parser")
         if "Student's Name" not in driver.page_source:
-            return {"Roll No": roll_no, "Status": "Record Not Found"}
+            return {"Roll No": roll_no, "Status": "Not Found"}
 
         student_name = aggregate_marks = "N/A"
         subject_data = {}
@@ -102,8 +100,8 @@ def get_bseb_result(roll_code, roll_no):
         return result
 
     except Exception as e:
-        logger.error(f"❌ Loop Error: {e}")
-        return {"Roll No": roll_no, "Status": "Processing Error"}
+        logger.error(f"❌ Scraper Error: {e}")
+        return {"Roll No": roll_no, "Status": "Error"}
     finally:
         driver.quit()
 
@@ -116,15 +114,24 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /batch 31082 26010001 5")
         return
 
-    roll_code, start_roll, count = context.args[0], int(context.args[1]), min(int(context.args[2]), 20)
-    status_msg = await update.message.reply_text(f"⏳ Processing {count} results...")
+    try:
+        roll_code = context.args[0]
+        start_roll = int(context.args[1])
+        count = min(int(context.args[2]), 15)
+    except:
+        await update.message.reply_text("❌ Error in input numbers.")
+        return
+
+    status_msg = await update.message.reply_text(f"⏳ Fetching {count} results...")
     
     all_data = []
     for i in range(count):
         curr = str(start_roll + i)
         res = get_bseb_result(roll_code, curr)
         all_data.append(res)
-        if (i+1) % 2 == 0: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count}...")
+        if (i+1) % 3 == 0:
+            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count}...")
+            except: pass
 
     df = pd.DataFrame(all_data)
     csv_file = io.BytesIO()
