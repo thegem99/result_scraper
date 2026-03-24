@@ -121,7 +121,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MAIN BOT =================
 if __name__ == "__main__":
     # Use environment variable for safety
-    TOKEN = os.environ.get("TOKEN")
+    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     if not TOKEN:
         raise ValueError("Please set the TOKEN environment variable!")
 
