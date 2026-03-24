@@ -2,7 +2,6 @@ import os
 import time
 import io
 import logging
-import shutil
 import pandas as pd
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
@@ -29,15 +28,25 @@ def get_bseb_result(roll_code, roll_no):
     options.add_argument("--disable-gpu")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
-    # Force Railway Chrome Path
-    options.binary_location = "/usr/bin/google-chrome"
+    # Path for Chrome/Driver in Nixpacks
+    chrome_bin = "/usr/bin/google-chrome"
+    driver_bin = "/usr/bin/chromedriver"
     
-    # AUTO-LOCATE Driver Path (Fixes NoSuchDriverException)
-    driver_path = shutil.which("chromedriver") or "/usr/bin/chromedriver"
-    logger.info(f"Using Chromedriver found at: {driver_path}")
+    # Check if files exist to provide better error messages in logs
+    if not os.path.exists(chrome_bin):
+        logger.error(f"❌ CRITICAL: Chrome binary NOT found at {chrome_bin}")
+    if not os.path.exists(driver_bin):
+        logger.error(f"❌ CRITICAL: Chromedriver NOT found at {driver_bin}")
+
+    options.binary_location = chrome_bin
+    service = Service(executable_path=driver_bin)
     
-    service = Service(executable_path=driver_path)
-    driver = webdriver.Chrome(service=service, options=options)
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+    except Exception as e:
+        logger.error(f"❌ Selenium failed to start: {e}")
+        return {"Roll No": roll_no, "Status": "Selenium Start Failed"}
+
     driver.set_page_load_timeout(30)
     wait = WebDriverWait(driver, 15)
     
@@ -59,36 +68,34 @@ def get_bseb_result(roll_code, roll_no):
         # 3. Submit
         driver.execute_script("document.getElementById('resultForm').submit()")
         
-        # Wait for result page to load
+        # Wait for result page
         time.sleep(5) 
         
-        # 4. Parse Content
+        # 4. Parse Results
         soup = BeautifulSoup(driver.page_source, "html.parser")
         
         if "Student's Name" not in driver.page_source:
-            # Check for website error alerts
+            # Check for error alert
             try:
                 err = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
                 return {"Roll No": roll_no, "Status": f"Error: {err}"}
             except:
-                return {"Roll No": roll_no, "Status": "Not Found"}
+                return {"Roll No": roll_no, "Status": "Result Page Not Found"}
 
         student_name = aggregate_marks = "N/A"
         subject_data = {}
 
-        # Extract Student Info
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
             if text == "Student's Name":
                 student_name = td.find_next_sibling("td").get_text(strip=True)
-            elif "Aggregate Marks" in text: # Fuzzy match for the colon
+            elif "Aggregate Marks" in text:
                 aggregate_marks = td.find_next_sibling("td").get_text(strip=True)
 
-        # Extract Marks Table
         marks_table = soup.find("table", {"class": "text_center"})
         if marks_table:
             rows = marks_table.find_all("tr")
-            for row in rows[3:]: # Skip headers
+            for row in rows[3:]: # Skip header rows
                 cells = row.find_all("td")
                 if len(cells) >= 8:
                     sub = cells[0].get_text(strip=True)
@@ -104,29 +111,29 @@ def get_bseb_result(roll_code, roll_no):
         return result_row
 
     except Exception as e:
-        logger.error(f"❌ Scraper Crashed for {roll_no}: {e}")
-        return {"Roll No": roll_no, "Status": "Timeout/System Error"}
+        logger.error(f"❌ Scraper Error: {e}")
+        return {"Roll No": roll_no, "Status": "Timeout or Site Busy"}
     finally:
         driver.quit()
 
-# ================= BOT HANDLERS =================
+# ================= TELEGRAM HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("BSEB Scraper is online.\nUsage: /batch <rollcode> <start_roll> <count>")
+    await update.message.reply_text("BSEB Bot Ready. Format: /batch 31082 26010001 5")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
-        await update.message.reply_text("❌ Usage: /batch 31082 26010001 5")
+        await update.message.reply_text("❌ Usage: /batch <rollcode> <start_roll> <count>")
         return
 
     roll_code = context.args[0]
     try:
         start_roll = int(context.args[1])
-        count = min(int(context.args[2]), 20) # Max 20 per request
+        count = min(int(context.args[2]), 15)
     except:
         await update.message.reply_text("❌ Invalid numbers.")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Processing {count} results... Check logs for details.")
+    status_msg = await update.message.reply_text(f"⏳ Processing {count} results...")
     
     results = []
     for i in range(count):
@@ -134,12 +141,12 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         res = get_bseb_result(roll_code, curr_roll)
         results.append(res)
         
-        # Progress Update
-        if (i+1) % 2 == 0 or i == count-1:
-            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} completed...")
+        # Update progress
+        if (i+1) % 3 == 0 or i == count-1:
+            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} fetched...")
             except: pass
 
-    # Generate CSV
+    # Build CSV using Pandas
     df = pd.DataFrame(results)
     output = io.BytesIO()
     df.to_csv(output, index=False)
@@ -157,7 +164,6 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
 
