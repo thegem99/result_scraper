@@ -1,28 +1,23 @@
-from telegram import Update
+# bot.py
+import os
+import time
+import io
+import csv
+from bs4 import BeautifulSoup
+
+from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-import time
-import csv
-import io
-
-from telegram import Bot
-import os
-
-
-
-# Remove any webhooks that might conflict
-bot.delete_webhook()
-print("Webhook cleared.")
 
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
     options = webdriver.ChromeOptions()
-    options.binary_location = "/usr/bin/google-chrome"
+    options.binary_location = "/usr/bin/google-chrome"  # Railway Chrome path
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -44,14 +39,13 @@ def get_bseb_result(roll_code, roll_no):
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
     driver.execute_script("document.getElementById('resultForm').submit()")
     
-    time.sleep(2)  # wait for page to load
+    time.sleep(2)
     html = driver.page_source
     driver.quit()
 
     # Parse results
     soup = BeautifulSoup(html, "html.parser")
 
-    # Student info
     student_name = roll_number = aggregate_marks = "N/A"
     for td in soup.find_all("td"):
         text = td.get_text(strip=True)
@@ -62,7 +56,6 @@ def get_bseb_result(roll_code, roll_no):
         elif text == "Aggregate Marks:":
             aggregate_marks = td.find_next_sibling("td").get_text(strip=True)
 
-    # Subject marks
     subjects = []
     marks_table = soup.find("table", {"class": "text_center"})
     if marks_table:
@@ -85,9 +78,11 @@ def get_bseb_result(roll_code, roll_no):
 
 # ================= TELEGRAM BOT HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results. Example:\n"
-                                        "/batch 32065 26030001 10")
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results.\n"
+             "Example: /batch 32065 26030001 10"
+    )
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -95,11 +90,13 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_roll = int(context.args[1])
         count = int(context.args[2])
     except (IndexError, ValueError):
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                       text="Usage: /batch <roll_code> <start_roll> <count>")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Usage: /batch <roll_code> <start_roll> <count>"
+        )
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take a while.")
 
     results = []
     for i in range(count):
@@ -113,22 +110,32 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
-    header = ["Roll No", "Name", "Aggregate Marks", "Subjects"]
-    writer.writerow(header)
+    writer.writerow(["Roll No", "Name", "Aggregate Marks", "Subjects"])
     for r in results:
-        subject_str = "; ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
-        writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subject_str])
+        subjects_str = "; ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
+        writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subjects_str])
 
     output.seek(0)
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
 # ================= MAIN BOT =================
 if __name__ == "__main__":
-    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
-    # TOKEN = os.environ.get("TOKEN", "<your_token_here>")
-    bot = Bot(TOKEN)
+    # Use environment variable for safety
+    TOKEN = os.environ.get("TOKEN")
+    if not TOKEN:
+        raise ValueError("Please set the TOKEN environment variable!")
+
+    # Create Bot instance first to delete webhook conflicts
+    bot_instance = Bot(TOKEN)
+    bot_instance.delete_webhook()
+    print("Webhook cleared.")
+
+    # Build the application
     app = ApplicationBuilder().token(TOKEN).build()
+
+    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
+
     print("Bot is running...")
     app.run_polling()
