@@ -17,36 +17,36 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_driver():
-    """Locates binaries and initializes the driver."""
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
 
-    # 1. Search for Chromium
-    chrome_path = (
-        shutil.which("chromium") or 
-        shutil.which("chromium-browser") or 
-        shutil.which("google-chrome") or 
-        "/usr/bin/chromium"
-    )
+    # 🔍 DEEP SEARCH FOR BINARIES
+    possible_chrome = [
+        shutil.which("chromium"),
+        shutil.which("chromium-browser"),
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/nix/store/*/bin/chromium" # For Nix environments
+    ]
     
-    # 2. Search for Chromedriver
-    driver_path = (
-        shutil.which("chromedriver") or 
-        "/usr/bin/chromedriver" or 
-        "/usr/local/bin/chromedriver"
-    )
+    possible_drivers = [
+        shutil.which("chromedriver"),
+        "/usr/bin/chromedriver",
+        "/usr/local/bin/chromedriver",
+        "/nix/store/*/bin/chromedriver"
+    ]
 
-    logger.info(f"Using Chrome: {chrome_path}")
-    logger.info(f"Using Driver: {driver_path}")
+    # Find the first one that actually exists
+    chrome_path = next((p for p in possible_chrome if p and os.path.exists(p)), None)
+    driver_path = next((p for p in possible_drivers if p and os.path.exists(p)), None)
 
-    # Validation to prevent the 'NoneType' error
-    if not chrome_path or not os.path.exists(chrome_path):
-        raise RuntimeError("Chromium binary not found!")
-    if not driver_path or not os.path.exists(driver_path):
-        raise RuntimeError("Chromedriver binary not found!")
+    if not chrome_path or not driver_path:
+        err_msg = f"MISSING: Chrome={chrome_path}, Driver={driver_path}"
+        logger.error(err_msg)
+        raise RuntimeError(err_msg)
 
     options.binary_location = chrome_path
     service = Service(executable_path=driver_path)
@@ -56,11 +56,10 @@ def get_bseb_result(roll_code, roll_no):
     driver = None
     try:
         driver = get_driver()
-        driver.set_page_load_timeout(30)
         driver.get("https://www.bsebexam.com/")
         
+        # Site Interaction
         wait = WebDriverWait(driver, 15)
-        # Wait for captcha
         wait.until(lambda d: d.execute_script("return document.getElementById('generatedCaptcha')?.dataset?.value") is not None)
         captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
@@ -75,9 +74,7 @@ def get_bseb_result(roll_code, roll_no):
         if "Student's Name" not in driver.page_source:
             return {"Roll No": roll_no, "Status": "Not Found"}
 
-        # Basic extraction
-        name = "N/A"
-        marks = "N/A"
+        name = marks = "N/A"
         for td in soup.find_all("td"):
             if td.get_text(strip=True) == "Student's Name":
                 name = td.find_next_sibling("td").get_text(strip=True)
@@ -87,15 +84,9 @@ def get_bseb_result(roll_code, roll_no):
         return {"Roll No": roll_no, "Student Name": name, "Marks": marks}
 
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        return {"Roll No": roll_no, "Status": f"Error: {str(e)[:50]}"}
+        return {"Roll No": roll_no, "Status": f"Crit Error: {str(e)}"}
     finally:
-        if driver:
-            driver.quit()
-
-# Telegram logic remains the same
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot Active. Use /batch <rollcode> <startroll> <count>")
+        if driver: driver.quit()
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3: return
@@ -114,6 +105,5 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
     app.run_polling()
