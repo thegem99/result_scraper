@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -9,7 +9,6 @@ from bs4 import BeautifulSoup
 import time
 import csv
 import io
-import asyncio
 
 # ====================== CONFIG ======================
 TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # hardcoded token
@@ -93,7 +92,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results...")
 
     results = []
     for i in range(count):
@@ -106,8 +105,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    header = ["Roll No", "Name", "Aggregate Marks", "Subjects"]
-    writer.writerow(header)
+    writer.writerow(["Roll No", "Name", "Aggregate Marks", "Subjects"])
     for r in results:
         subject_str = "; ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
         writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subject_str])
@@ -116,21 +114,18 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
 # ================= MAIN =================
-async def run_bot():
+def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # await delete webhook to prevent conflicts
-    await app.bot.delete_webhook()
-    print("Webhook cleared.")
+    # Delete webhook to prevent conflicts
+    app.bot.delete_webhook()  # no need to await
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
 
     print("Bot is running...")
-    await app.run_polling(poll_interval=1, timeout=30)
+    app.run_polling(poll_interval=1, timeout=30)
 
 # ================= ENTRY POINT =================
 if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()  # fixes "event loop already running" errors
-    asyncio.get_event_loop().run_until_complete(run_bot())
+    main()
