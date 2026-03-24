@@ -23,25 +23,17 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     
-    # Nixpacks places binaries in the PATH automatically once installed
-    chrome_path = shutil.which("chromium") or shutil.which("google-chrome")
-    driver_path = shutil.which("chromedriver")
+    # 🔍 This will find the browser installed by the .toml file above
+    chrome_path = shutil.which("chromium") or shutil.which("google-chrome") or "/usr/bin/chromium"
+    driver_path = shutil.which("chromedriver") or "/usr/bin/chromedriver"
 
-    logger.info(f"🔍 System Search Result - Chrome: {chrome_path} | Driver: {driver_path}")
-
-    if not chrome_path or not driver_path:
-        # Emergency hardcoded fallback if shutil.which fails
-        chrome_path = "/usr/bin/chromium"
-        driver_path = "/usr/bin/chromedriver"
+    logger.info(f"📍 FOUND CHROME AT: {chrome_path}")
+    logger.info(f"📍 FOUND DRIVER AT: {driver_path}")
 
     options.binary_location = chrome_path
     service = Service(executable_path=driver_path)
     
-    try:
-        return webdriver.Chrome(service=service, options=options)
-    except Exception as e:
-        logger.error(f"❌ Selenium start failed: {e}")
-        raise e
+    return webdriver.Chrome(service=service, options=options)
 
 def get_bseb_result(roll_code, roll_no):
     driver = None
@@ -50,6 +42,7 @@ def get_bseb_result(roll_code, roll_no):
         driver.get("https://www.bsebexam.com/")
         
         wait = WebDriverWait(driver, 15)
+        # Wait for captcha
         wait.until(lambda d: d.execute_script("return document.getElementById('generatedCaptcha')?.dataset?.value") is not None)
         captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
@@ -58,11 +51,11 @@ def get_bseb_result(roll_code, roll_no):
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
         driver.execute_script("document.getElementById('resultForm').submit()")
         
-        time.sleep(5)
+        time.sleep(6)
         soup = BeautifulSoup(driver.page_source, "html.parser")
         
         if "Student's Name" not in driver.page_source:
-            return {"Roll No": roll_no, "Status": "Result Not Found"}
+            return {"Roll No": roll_no, "Status": "Not Found"}
 
         name = marks = "N/A"
         for td in soup.find_all("td"):
@@ -74,33 +67,27 @@ def get_bseb_result(roll_code, roll_no):
         return {"Roll No": roll_no, "Student Name": name, "Marks": marks}
 
     except Exception as e:
-        return {"Roll No": roll_no, "Status": f"Error: {str(e)[:50]}"}
+        logger.error(f"❌ Scraper Failed: {e}")
+        return {"Roll No": roll_no, "Status": "Engine Error"}
     finally:
         if driver: driver.quit()
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 3:
-        await update.message.reply_text("Usage: /batch <rollcode> <startroll> <count>")
-        return
-        
-    roll_code, start_roll, count = context.args[0], int(context.args[1]), min(int(context.args[2]), 10)
-    status = await update.message.reply_text(f"🚀 Scraping {count} results...")
+    if len(context.args) < 3: return
+    roll_code, start_roll, count = context.args[0], int(context.args[1]), min(int(context.args[2]), 5)
     
-    results = []
-    for i in range(count):
-        curr = str(start_roll + i)
-        results.append(get_bseb_result(roll_code, curr))
+    status = await update.message.reply_text(f"⏳ Processing {count} results...")
+    results = [get_bseb_result(roll_code, str(start_roll + i)) for i in range(count)]
         
     df = pd.DataFrame(results)
     buf = io.BytesIO()
     df.to_csv(buf, index=False)
     buf.seek(0)
-    
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=buf, filename=f"BSEB_{roll_code}.csv")
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=buf, filename="results.csv")
     await status.delete()
 
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("batch", batch))
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling()
