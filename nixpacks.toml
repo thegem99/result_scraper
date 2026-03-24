@@ -5,4 +5,4 @@ nixPkgs = ["python311", "chromium", "chromedriver"]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "python bot.py"
+cmd = "SE_OFFLINE=true python bot.py"
