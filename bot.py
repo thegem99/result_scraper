@@ -115,7 +115,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= MAIN BOT =================
 if __name__ == "__main__":
     import os
-    TOKEN = os.getenv("TOKEN")  # Read token from Railway env variable
+    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # Read token from Railway env variable
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
