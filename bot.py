@@ -20,61 +20,71 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ================= THE HARDENED SCRAPER =================
 def get_bseb_result(roll_code, roll_no):
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--remote-debugging-port=9222")
     
-    # 1. Force use of Chromium
-    chrome_bin = shutil.which("chromium") or "/usr/bin/chromium"
+    # 1. FORCE SYSTEM PATHS (Bypasses Selenium Manager Cache)
+    chrome_bin = "/usr/bin/chromium"
+    driver_bin = "/usr/bin/chromedriver"
+    
+    # Check if Nix installed them elsewhere and update path
+    if not os.path.exists(chrome_bin):
+        chrome_bin = shutil.which("chromium") or shutil.which("google-chrome")
+    if not os.path.exists(driver_bin):
+        driver_bin = shutil.which("chromedriver")
+
     options.binary_location = chrome_bin
     
-    # 2. Force use of Chromedriver
-    driver_bin = shutil.which("chromedriver") or "/usr/bin/chromedriver"
-    
-    logger.info(f"Using Browser: {chrome_bin}")
-    logger.info(f"Using Driver: {driver_bin}")
-
-    # 3. Initialize using the 4.9.0 direct Service method
+    driver = None
     try:
+        # 2. DIRECT SERVICE INITIALIZATION
+        # This prevents the 'Status 127' error by using the system binary directly
         service = Service(executable_path=driver_bin)
         driver = webdriver.Chrome(service=service, options=options)
-    except Exception as e:
-        logger.error(f"❌ Initialization Failed: {e}")
-        return {"Roll No": roll_no, "Status": "Driver Error"}
-
-    driver.set_page_load_timeout(30)
-    wait = WebDriverWait(driver, 15)
-    
-    try:
-        logger.info(f"🚀 Scraping Roll: {roll_no}")
+        driver.set_page_load_timeout(35)
+        
+        logger.info(f"🚀 Starting Scrape: {roll_no}")
         driver.get("https://www.bsebexam.com/")
         
-        # Wait for Captcha dataset
+        # 3. CAPTCHA LOGIC
+        wait = WebDriverWait(driver, 20)
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha')?.dataset?.value"
         ) is not None)
         captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-        # Fill Form
+        # 4. FORM SUBMISSION
         driver.find_element(By.ID, "rollcode").send_keys(str(roll_code))
         driver.find_element(By.ID, "rollno").send_keys(str(roll_no))
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
         
-        # Submit
+        # Trigger the site's own submit function
         driver.execute_script("document.getElementById('resultForm').submit()")
         
-        time.sleep(5) 
+        # Wait for transition
+        time.sleep(6) 
         
+        # 5. DATA EXTRACTION
         soup = BeautifulSoup(driver.page_source, "html.parser")
         if "Student's Name" not in driver.page_source:
-            return {"Roll No": roll_no, "Status": "Not Found"}
+            # Check for error message in the UI
+            try:
+                err = driver.find_element(By.CLASS_NAME, "swal2-html-container").text
+                return {"Roll No": roll_no, "Status": f"Failed: {err}"}
+            except:
+                return {"Roll No": roll_no, "Status": "Data Not Found"}
 
         student_name = aggregate_marks = "N/A"
         subject_data = {}
 
+        # Parsing Table
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
             if text == "Student's Name":
@@ -84,66 +94,80 @@ def get_bseb_result(roll_code, roll_no):
 
         marks_table = soup.find("table", {"class": "text_center"})
         if marks_table:
-            for row in marks_table.find_all("tr")[3:]:
+            rows = marks_table.find_all("tr")
+            for row in rows[3:]:
                 cells = row.find_all("td")
                 if len(cells) >= 8:
-                    sub_name = cells[0].get_text(strip=True)
-                    subject_data[f"{sub_name}_Total"] = cells[7].get_text(strip=True)
+                    sub = cells[0].get_text(strip=True)
+                    subject_data[f"{sub}_Total"] = cells[7].get_text(strip=True)
 
-        result = {
+        res_row = {
             "Roll No": roll_no,
             "Student Name": student_name,
             "Aggregate Marks": aggregate_marks
         }
-        result.update(subject_data)
-        logger.info(f"✅ Fetched {roll_no}")
-        return result
+        res_row.update(subject_data)
+        logger.info(f"✅ Success: {roll_no}")
+        return res_row
 
     except Exception as e:
-        logger.error(f"❌ Scraper Error: {e}")
-        return {"Roll No": roll_no, "Status": "Error"}
+        logger.error(f"❌ Scraper Error on {roll_no}: {str(e)}")
+        return {"Roll No": roll_no, "Status": "System/Network Error"}
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
 
 # ================= TELEGRAM HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("BSEB Bot Active. Usage: /batch <roll_code> <start_roll> <count>")
+    await update.message.reply_text("BSEB Scraper is Live.\n\nUsage: /batch <rollcode> <start_roll> <count>")
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
-        await update.message.reply_text("Usage: /batch 31082 26010001 5")
+        await update.message.reply_text("❌ Missing info! Example: /batch 31082 26010001 5")
         return
 
+    roll_code = context.args[0]
     try:
-        roll_code = context.args[0]
         start_roll = int(context.args[1])
-        count = min(int(context.args[2]), 15)
+        count = min(int(context.args[2]), 15) # Safety limit
     except:
-        await update.message.reply_text("❌ Error in input numbers.")
+        await update.message.reply_text("❌ Roll/Count must be numbers.")
         return
 
-    status_msg = await update.message.reply_text(f"⏳ Fetching {count} results...")
+    status_msg = await update.message.reply_text(f"⏳ Processing {count} students... please wait.")
     
-    all_data = []
+    results = []
     for i in range(count):
-        curr = str(start_roll + i)
-        res = get_bseb_result(roll_code, curr)
-        all_data.append(res)
-        if (i+1) % 3 == 0:
-            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count}...")
+        curr_roll = str(start_roll + i)
+        data = get_bseb_result(roll_code, curr_roll)
+        results.append(data)
+        
+        # Periodic Progress Update
+        if (i+1) % 2 == 0 or i == count-1:
+            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count} fetched...")
             except: pass
 
-    df = pd.DataFrame(all_data)
-    csv_file = io.BytesIO()
-    df.to_csv(csv_file, index=False)
-    csv_file.seek(0)
+    # CSV Generation
+    df = pd.DataFrame(results)
+    csv_stream = io.BytesIO()
+    df.to_csv(csv_stream, index=False)
+    csv_stream.seek(0)
 
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=csv_file, filename=f"BSEB_{roll_code}.csv")
+    await context.bot.send_document(
+        chat_id=update.effective_chat.id,
+        document=csv_stream,
+        filename=f"BSEB_{roll_code}.csv",
+        caption=f"✅ Done! {len(results)} records processed."
+    )
     await status_msg.delete()
 
+# ================= EXECUTION =================
 if __name__ == "__main__":
     TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
+    
+    print("🚀 Bot starting...")
     app.run_polling(drop_pending_updates=True)
