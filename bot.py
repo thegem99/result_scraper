@@ -124,7 +124,7 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN BOT =================
 if __name__ == "__main__":
-    TOKEN = os.getenv("TOKEN")
+    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
