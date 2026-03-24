@@ -46,7 +46,6 @@ def get_bseb_result(roll_code, roll_no):
         
         # Submit (Direct JS submit as per your working script)
         driver.execute_script("document.getElementById('resultForm').submit()")
-        time.sleep(3) 
 
         # ===== ERROR CHECK (SweetAlert) =====
         try:
