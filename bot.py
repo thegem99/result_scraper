@@ -12,7 +12,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 
-# Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,76 +22,64 @@ def get_driver():
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     
-    # Force the binary location of the browser
+    # Path where Nixpacks installs Chromium
     options.binary_location = "/usr/bin/chromium"
     
-    # 🛠️ THE FIX: We manually start the Service object 
-    # and then pass it to the Chrome object.
+    # Force the use of the system chromedriver
+    service = Service(executable_path="/usr/bin/chromedriver")
+    
+    # This is the key: We pass the service and options separately 
+    # and do NOT let Selenium try to find its own driver.
     try:
-        service = Service(executable_path="/usr/bin/chromedriver")
-        # We also pass 'service_args' to ensure it doesn't try to auto-update
         driver = webdriver.Chrome(service=service, options=options)
         return driver
     except Exception as e:
-        logger.error(f"❌ Driver Start Failed: {e}")
-        # Final fallback: If /usr/bin fails, try finding it via system path
-        import shutil
-        alt_driver = shutil.which("chromedriver")
-        service = Service(executable_path=alt_driver)
-        return webdriver.Chrome(service=service, options=options)
+        logger.error(f"❌ Failed to start Chrome: {e}")
+        raise e
 
 def get_bseb_result(roll_code, roll_no):
     driver = None
     try:
         driver = get_driver()
-        driver.set_page_load_timeout(40) # BSEB is slow
         driver.get("https://www.bsebexam.com/")
         
-        wait = WebDriverWait(driver, 25)
-        
-        # Check for Captcha
-        wait.until(lambda d: d.execute_script(
-            "return document.getElementById('generatedCaptcha')?.dataset?.value"
-        ) is not None)
-        
+        # Wait for the site's captcha value
+        wait = WebDriverWait(driver, 20)
+        wait.until(lambda d: d.execute_script("return document.getElementById('generatedCaptcha')?.dataset?.value") is not None)
         captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-        # Fill and Submit
         driver.find_element(By.ID, "rollcode").send_keys(str(roll_code))
         driver.find_element(By.ID, "rollno").send_keys(str(roll_no))
         driver.find_element(By.ID, "captchaInput").send_keys(captcha)
         
-        # Using JS to click to avoid "Element not clickable" errors
-        btn = driver.find_element(By.ID, "btnSubmit")
-        driver.execute_script("arguments[0].click();", btn)
+        # Use JavaScript to click the submit button
+        driver.execute_script("document.getElementById('resultForm').submit()")
         
-        # Long wait for BSEB results to process
-        time.sleep(10)
+        # Wait for govt server
+        time.sleep(8)
         
         soup = BeautifulSoup(driver.page_source, "html.parser")
         if "Student's Name" not in driver.page_source:
-            return {"Roll No": roll_no, "Status": "Not Found / Server Slow"}
+            return {"Roll No": roll_no, "Status": "Not Found / Slow Server"}
 
-        res = {"Roll No": roll_no}
-        # Dynamic Extraction
+        name = "N/A"
+        marks = "N/A"
         for td in soup.find_all("td"):
             txt = td.get_text(strip=True)
             if txt == "Student's Name":
-                res["Name"] = td.find_next_sibling("td").get_text(strip=True)
+                name = td.find_next_sibling("td").get_text(strip=True)
             elif "Aggregate Marks" in txt:
-                res["Marks"] = td.find_next_sibling("td").get_text(strip=True)
+                marks = td.find_next_sibling("td").get_text(strip=True)
 
         logger.info(f"✅ Success: {roll_no}")
-        return res
+        return {"Roll No": roll_no, "Student Name": name, "Marks": marks}
 
     except Exception as e:
-        logger.error(f"❌ Scraper loop error: {str(e)[:100]}")
-        return {"Roll No": roll_no, "Status": "System Error"}
+        logger.error(f"❌ Scraper error: {e}")
+        return {"Roll No": roll_no, "Status": "Error"}
     finally:
         if driver:
             driver.quit()
-
-# --- Telegram Logic ---
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 3:
@@ -104,11 +91,8 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     results = []
     for i in range(count):
-        curr = str(start_roll + i)
-        results.append(get_bseb_result(roll_code, curr))
-        if (i+1) % 2 == 0:
-            try: await status_msg.edit_text(f"⏳ Progress: {i+1}/{count}...")
-            except: pass
+        curr_roll = str(start_roll + i)
+        results.append(get_bseb_result(roll_code, curr_roll))
         
     df = pd.DataFrame(results)
     buf = io.BytesIO()
