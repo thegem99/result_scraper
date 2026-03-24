@@ -1,19 +1,20 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-import io
-import csv
 import time
+import csv
+import io
+import asyncio
 
-# ================== CONFIG ==================
-TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # <-- hardcoded token
+# ====================== CONFIG ======================
+TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"  # your bot token
 
-# ================= SELENIUM FETCHER =================
+# ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
     options = webdriver.ChromeOptions()
     options.binary_location = "/usr/bin/google-chrome"
@@ -23,22 +24,28 @@ def get_bseb_result(roll_code, roll_no):
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 10)
+
     driver.get("https://www.bsebexam.com/")
 
+    # Get CAPTCHA
     wait.until(lambda d: d.execute_script(
         "return document.getElementById('generatedCaptcha').dataset.value"
     ) is not None)
     captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
+    # Fill form
     driver.find_element(By.ID, "rollcode").send_keys(roll_code)
     driver.find_element(By.ID, "rollno").send_keys(roll_no)
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
     driver.execute_script("document.getElementById('resultForm').submit()")
-    time.sleep(2)
+
+    time.sleep(2)  # wait for page to load
     html = driver.page_source
     driver.quit()
 
+    # Parse results
     soup = BeautifulSoup(html, "html.parser")
+
     student_name = roll_number = aggregate_marks = "N/A"
     for td in soup.find_all("td"):
         text = td.get_text(strip=True)
@@ -69,11 +76,12 @@ def get_bseb_result(roll_code, roll_no):
         "Subjects": subjects
     }
 
-# ================= BOT HANDLERS =================
+# ================= TELEGRAM HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Send /batch <roll_code> <start_roll> <count>\nExample: /batch 32065 26030001 10"
+        text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results.\n"
+             "Example:\n/batch 32065 26030001 10"
     )
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,12 +90,13 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_roll = int(context.args[1])
         count = int(context.args[2])
     except (IndexError, ValueError):
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                       text="Usage: /batch <roll_code> <start_roll> <count>")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Usage: /batch <roll_code> <start_roll> <count>"
+        )
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Fetching results... This may take a while.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
 
     results = []
     for i in range(count):
@@ -100,20 +109,29 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Roll No", "Name", "Aggregate Marks", "Subjects"])
+    header = ["Roll No", "Name", "Aggregate Marks", "Subjects"]
+    writer.writerow(header)
     for r in results:
         subject_str = "; ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
         writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subject_str])
 
     output.seek(0)
-    await context.bot.send_document(chat_id=update.effective_chat.id,
-                                    document=output,
-                                    filename="bseb_results.csv")
+    await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
-# ================= MAIN BOT =================
-if __name__ == "__main__":
+# ================= MAIN =================
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
+
+    # Clear any webhook conflicts
+    await app.bot.delete_webhook()
+    print("Webhook cleared.")
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
+
     print("Bot is running...")
-    app.run_polling()  # ✅ just run polling, no asyncio.run() needed
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
