@@ -1,5 +1,5 @@
-# bot.py
 import os
+import asyncio
 import time
 import io
 import csv
@@ -17,7 +17,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ================= SELENIUM RESULT FETCHER =================
 def get_bseb_result(roll_code, roll_no):
     options = webdriver.ChromeOptions()
-    options.binary_location = "/usr/bin/google-chrome"  # Railway Chrome path
+    options.binary_location = "/usr/bin/google-chrome"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -27,13 +27,11 @@ def get_bseb_result(roll_code, roll_no):
 
     driver.get("https://www.bsebexam.com/")
     
-    # Get CAPTCHA
     wait.until(lambda d: d.execute_script(
         "return document.getElementById('generatedCaptcha').dataset.value"
     ) is not None)
     captcha = driver.execute_script("return document.getElementById('generatedCaptcha').dataset.value")
 
-    # Fill form
     driver.find_element(By.ID, "rollcode").send_keys(roll_code)
     driver.find_element(By.ID, "rollno").send_keys(roll_no)
     driver.find_element(By.ID, "captchaInput").send_keys(captcha)
@@ -43,10 +41,9 @@ def get_bseb_result(roll_code, roll_no):
     html = driver.page_source
     driver.quit()
 
-    # Parse results
     soup = BeautifulSoup(html, "html.parser")
-
     student_name = roll_number = aggregate_marks = "N/A"
+
     for td in soup.find_all("td"):
         text = td.get_text(strip=True)
         if text == "Student's Name":
@@ -69,19 +66,13 @@ def get_bseb_result(roll_code, roll_no):
                     "Total": cells[7].get_text(strip=True)
                 })
 
-    return {
-        "Roll No": roll_number,
-        "Name": student_name,
-        "Aggregate Marks": aggregate_marks,
-        "Subjects": subjects
-    }
+    return {"Roll No": roll_number, "Name": student_name, "Aggregate Marks": aggregate_marks, "Subjects": subjects}
 
 # ================= TELEGRAM BOT HANDLERS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Send /batch <roll_code> <start_roll> <count> to fetch multiple results.\n"
-             "Example: /batch 32065 26030001 10"
+        text="Send /batch <roll_code> <start_roll> <count> to fetch results.\nExample: /batch 32065 26030001 10"
     )
 
 async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -90,13 +81,11 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start_roll = int(context.args[1])
         count = int(context.args[2])
     except (IndexError, ValueError):
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Usage: /batch <roll_code> <start_roll> <count>"
-        )
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text="Usage: /batch <roll_code> <start_roll> <count>")
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take a while.")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Fetching results... This may take some time.")
 
     results = []
     for i in range(count):
@@ -107,35 +96,34 @@ async def batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             results.append({"Roll No": roll_no, "Name": "Error fetching", "Aggregate Marks": str(e), "Subjects": []})
 
-    # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Roll No", "Name", "Aggregate Marks", "Subjects"])
     for r in results:
         subjects_str = "; ".join([f"{s['Subject']}:{s['Total']}" for s in r["Subjects"]])
         writer.writerow([r["Roll No"], r["Name"], r["Aggregate Marks"], subjects_str])
-
     output.seek(0)
     await context.bot.send_document(chat_id=update.effective_chat.id, document=output, filename="bseb_results.csv")
 
 # ================= MAIN BOT =================
-if __name__ == "__main__":
-    # Use environment variable for safety
-    TOKEN = "8623695113:AAF3VAXr4mbmoWGYjbCHJ_eTrnVHyDwfsP4"
+async def main():
+    TOKEN = os.environ.get("TOKEN")
     if not TOKEN:
         raise ValueError("Please set the TOKEN environment variable!")
 
-    # Create Bot instance first to delete webhook conflicts
     bot_instance = Bot(TOKEN)
-    bot_instance.delete_webhook()
+    # Await webhook deletion to avoid RuntimeWarning
+    await bot_instance.delete_webhook()
     print("Webhook cleared.")
 
-    # Build the application
     app = ApplicationBuilder().token(TOKEN).build()
-
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("batch", batch))
 
     print("Bot is running...")
-    app.run_polling()
+    await app.run_polling()
+
+# Run main with asyncio
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
