@@ -14,15 +14,18 @@ CACHE = {}
 
 SUBJECTS = ["english","hindi","physics","chemistry","mathematics","biology"]
 
+# ================= SESSION =================
 def get_session():
     return requests.Session()
 
+# ================= TOKEN =================
 def get_token(session):
     res = session.get(BASE_URL + "/", timeout=15)
     soup = BeautifulSoup(res.text, "html.parser")
     token = soup.find("input", {"name": "__RequestVerificationToken"})
     return token.get("value") if token else None
 
+# ================= SUBJECT NORMALIZER =================
 def normalize_subject(name):
     name = name.lower().strip()
     if "math" in name: return "mathematics"
@@ -33,6 +36,7 @@ def normalize_subject(name):
     if "hindi" in name: return "hindi"
     return None
 
+# ================= FETCH RESULT =================
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
     payload = {
@@ -50,7 +54,6 @@ def fetch_result(session, token, rollcode, rollno):
     res = session.post(url, data=payload, headers=headers, timeout=20)
     soup = BeautifulSoup(res.text, "html.parser")
     data = {"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
-
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
         if len(cols) < 2:
@@ -172,19 +175,21 @@ particlesJS("particles-js",{
 def view():
     rollcode = request.args.get("rollcode")
     rollno = request.args.get("rollno")
-    count = min(int(request.args.get("count",1)),50)
+    count = min(int(request.args.get("count", 1)), 50)
     session = get_session()
-    token = get_token(session)
     results = []
+
     for i in range(count):
         rn = str(int(rollno)+i)
+        token = get_token(session)  # ✅ fresh token for each roll number
         try:
-            res = fetch_result(session,token,rollcode,rn)
+            res = fetch_result(session, token, rollcode, rn)
         except:
             res = {"name":"Error","father":"","roll_no":rn,"school":"","total":"","subjects":{}}
         results.append(res)
         time.sleep(0.3)
-    CACHE["data"]=results
+
+    CACHE["data"] = results
 
     html = """
 <html>
