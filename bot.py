@@ -1,69 +1,35 @@
 from flask import Flask, request, jsonify
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
-import os
 import time
 
 app = Flask(__name__)
 
-# ================= ENV FIX =================
-os.environ["PATH"] += ":/usr/bin"
-
-# ================= DRIVER CREATION =================
-def create_driver():
-    options = webdriver.ChromeOptions()
-
-    # Railway Chromium (from nix)
-    options.binary_location = "/usr/bin/chromium"
-
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080")
-
-    # IMPORTANT: force system chromedriver
-    service = Service("/usr/bin/chromedriver")
-
-    return webdriver.Chrome(service=service, options=options)
-
 
 # ================= SCRAPER =================
-def get_result(rollcode, roll_no):
-    driver = None
+def get_result(page, rollcode, roll_no):
     try:
-        driver = create_driver()
-        wait = WebDriverWait(driver, 20)
+        page.goto("https://www.bsebexam.com/", timeout=60000)
 
-        driver.get("https://www.bsebexam.com/")
+        # wait for captcha element
+        page.wait_for_selector("#generatedCaptcha", timeout=20000)
 
-        # wait for captcha
-        wait.until(lambda d: d.execute_script(
-            "return document.getElementById('generatedCaptcha')?.dataset?.value"
-        ))
-
-        captcha = driver.execute_script(
-            "return document.getElementById('generatedCaptcha').dataset.value"
+        captcha = page.eval_on_selector(
+            "#generatedCaptcha",
+            "el => el.dataset.value"
         )
 
-        # fill form safely using JS
-        driver.execute_script(
-            "document.getElementById('rollcode').value = arguments[0];", rollcode
-        )
-        driver.execute_script(
-            "document.getElementById('rollno').value = arguments[0];", roll_no
-        )
-        driver.execute_script(
-            "document.getElementById('captchaInput').value = arguments[0];", captcha
-        )
+        # fill form
+        page.fill("#rollcode", rollcode)
+        page.fill("#rollno", roll_no)
+        page.fill("#captchaInput", captcha)
 
-        driver.execute_script("document.getElementById('resultForm').submit();")
+        page.click("#resultForm button[type='submit']")
 
-        time.sleep(2)
+        page.wait_for_timeout(3000)
 
-        soup = BeautifulSoup(driver.page_source, "html.parser")
+        html = page.content()
+        soup = BeautifulSoup(html, "html.parser")
 
         result = {
             "roll_no": roll_no,
@@ -106,12 +72,18 @@ def get_result(rollcode, roll_no):
             "error": str(e)
         }
 
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
+
+# ================= GLOBAL PLAYWRIGHT =================
+playwright = sync_playwright().start()
+browser = playwright.chromium.launch(
+    headless=True,
+    args=[
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+    ]
+)
+context = browser.new_context()
 
 
 # ================= API =================
@@ -133,7 +105,10 @@ def batch():
         roll_no = str(start + i)
         print("Fetching:", roll_no)
 
-        data = get_result(rollcode, roll_no)
+        page = context.new_page()
+        data = get_result(page, rollcode, roll_no)
+        page.close()
+
         results.append(data)
 
     return jsonify(results)
@@ -142,19 +117,23 @@ def batch():
 # ================= HEALTH =================
 @app.route("/")
 def home():
-    return {"status": "running"}
+    return {"status": "running (playwright)"}
 
 
-# ================= DEBUG (IMPORTANT) =================
-@app.route("/debug")
-def debug():
-    return {
-        "chromedriver": os.popen("which chromedriver").read(),
-        "chromium": os.popen("which chromium").read()
-    }
+# ================= SHUTDOWN CLEANUP =================
+@app.route("/shutdown")
+def shutdown():
+    try:
+        context.close()
+        browser.close()
+        playwright.stop()
+    except:
+        pass
+    return {"message": "shutdown complete"}
 
 
 # ================= RUN =================
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
