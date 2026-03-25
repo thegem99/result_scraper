@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, Response
 import requests
 from bs4 import BeautifulSoup
 import os
@@ -8,11 +8,9 @@ app = Flask(__name__)
 
 BASE_URL = "https://www.bsebexam.com"
 
-
 # ================= SESSION =================
 def get_session():
     return requests.Session()
-
 
 # ================= TOKEN =================
 def get_token(session):
@@ -21,31 +19,24 @@ def get_token(session):
     token = soup.find("input", {"name": "__RequestVerificationToken"})
     return token.get("value") if token else None
 
-
 # ================= SUBJECT NORMALIZER =================
 def normalize_subject(name):
     name = name.lower().strip()
 
     if "math" in name:
         return "mathematics"
-
     if "bio" in name:
         return "biology"
-
     if "physic" in name:
         return "physics"
-
     if "chem" in name:
         return "chemistry"
-
     if "english" in name:
         return "english"
-
     if "hindi" in name:
         return "hindi"
 
     return None
-
 
 # ================= SUBJECT ORDER =================
 SUBJECTS = [
@@ -56,7 +47,6 @@ SUBJECTS = [
     "mathematics",
     "biology"
 ]
-
 
 # ================= FETCH RESULT =================
 def fetch_result(session, token, rollcode, rollno):
@@ -88,7 +78,6 @@ def fetch_result(session, token, rollcode, rollno):
         "subjects": {}
     }
 
-    # ================= PARSE TABLE =================
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
 
@@ -98,7 +87,6 @@ def fetch_result(session, token, rollcode, rollno):
         key = cols[0].lower().strip()
         value = cols[-1].strip()
 
-        # ---------------- BASIC INFO ----------------
         if "student" in key and "name" in key:
             data["name"] = value
 
@@ -111,7 +99,6 @@ def fetch_result(session, token, rollcode, rollno):
         elif "aggregate" in key:
             data["total"] = value
 
-        # ---------------- IGNORE NOISE ----------------
         elif any(x in key for x in [
             "print", "back", "copy", "web",
             "bihar school examination board",
@@ -122,19 +109,15 @@ def fetch_result(session, token, rollcode, rollno):
         ]):
             continue
 
-        # ---------------- SUBJECTS ----------------
         elif len(cols) >= 5:
             subject_raw = cols[0].strip()
-
             norm = normalize_subject(subject_raw)
-
             if norm:
                 data["subjects"][norm] = value
 
     return data
 
-
-# ================= HOME PAGE =================
+# ================= HOME =================
 @app.route("/")
 def home():
     return render_template_string("""
@@ -149,7 +132,6 @@ body{
     text-align:center;
     color:white;
 }
-
 .box{
     background:white;
     color:black;
@@ -157,36 +139,25 @@ body{
     margin:50px auto;
     padding:20px;
     border-radius:12px;
-    box-shadow:0 10px 20px rgba(0,0,0,0.2);
 }
-
 input,select,button{
     width:90%;
     padding:10px;
     margin:10px;
-    border:1px solid #ddd;
-    border-radius:6px;
 }
-
 button{
     background:#2c3e50;
     color:white;
     cursor:pointer;
 }
-
-button:hover{
-    background:#1a252f;
-}
 </style>
 </head>
-
 <body>
 
 <div class="box">
 <h2>BSEB Result 2026</h2>
 
 <form action="/view" method="get">
-
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Starting Roll Number" required>
 
@@ -198,7 +169,6 @@ button:hover{
 <input name="count" id="count" value="1">
 
 <button type="submit">Get Result</button>
-
 </form>
 </div>
 
@@ -221,8 +191,7 @@ toggle();
 </html>
 """)
 
-
-# ================= RESULT PAGE =================
+# ================= VIEW =================
 @app.route("/view")
 def view():
     rollcode = request.args.get("rollcode")
@@ -233,82 +202,45 @@ def view():
     token = get_token(session)
 
     results = []
-
     for i in range(count):
         rn = str(int(rollno) + i)
         results.append(fetch_result(session, token, rollcode, rn))
         time.sleep(0.2)
 
-    # ================= HTML =================
     html = """
 <html>
 <head>
 <style>
-body{
-    font-family:Arial;
-    background:#f4f6f9;
-    padding:20px;
-}
-
-h2{
-    text-align:center;
-}
-
-table{
-    width:100%;
-    border-collapse:collapse;
-    background:white;
-    box-shadow:0 5px 10px rgba(0,0,0,0.1);
-}
-
-th,td{
-    border:1px solid #ddd;
-    padding:8px;
-    text-align:center;
-    font-size:13px;
-}
-
-th{
-    background:#2c3e50;
-    color:white;
-    position:sticky;
-    top:0;
-}
-
-tr:nth-child(even){
-    background:#f9f9f9;
-}
-
-tr:hover{
-    background:#f1f1f1;
-}
+body{font-family:Arial;background:#f4f6f9;padding:20px;}
+table{width:100%;border-collapse:collapse;background:white;}
+th,td{border:1px solid #ddd;padding:8px;text-align:center;}
+th{background:#2c3e50;color:white;}
 </style>
 </head>
-
 <body>
 
 <h2>BSEB Clean Result Sheet</h2>
-
-<table>
-
-<tr>
-<th>Name</th>
-<th>Father</th>
-<th>Roll No</th>
-<th>School</th>
-<th>Total Marks</th>
 """
 
-    # ================= SUBJECT HEADERS =================
-    for s in SUBJECTS:
-        html += f"<th>{s.title()}</th>"
+    # ===== DOWNLOAD BUTTON =====
+    html += f"""
+<div style="text-align:center;margin-bottom:15px;">
+<a href="/download?rollcode={rollcode}&rollno={rollno}&count={count}">
+<button style="padding:10px 20px;background:#27ae60;color:white;border:none;border-radius:6px;">
+Download CSV
+</button>
+</a>
+</div>
+"""
 
+    html += "<table><tr>"
+    headers = ["Name","Father","Roll No","School","Total"] + [s.title() for s in SUBJECTS]
+    for h in headers:
+        html += f"<th>{h}</th>"
     html += "</tr>"
 
-    # ================= ROWS =================
     for r in results:
         html += "<tr>"
-
         html += f"<td>{r['name']}</td>"
         html += f"<td>{r['father']}</td>"
         html += f"<td>{r['roll_no']}</td>"
@@ -316,20 +248,52 @@ tr:hover{
         html += f"<td>{r['total']}</td>"
 
         for s in SUBJECTS:
-            value = r["subjects"].get(s, "")
-            html += f"<td>{value}</td>"
+            html += f"<td>{r['subjects'].get(s,'')}</td>"
 
         html += "</tr>"
 
-    html += """
-</table>
-
-</body>
-</html>
-"""
-
+    html += "</table></body></html>"
     return html
 
+# ================= DOWNLOAD CSV =================
+@app.route("/download")
+def download():
+    rollcode = request.args.get("rollcode")
+    rollno = request.args.get("rollno")
+    count = int(request.args.get("count", 1))
+
+    session = get_session()
+    token = get_token(session)
+
+    results = []
+    for i in range(count):
+        rn = str(int(rollno) + i)
+        results.append(fetch_result(session, token, rollcode, rn))
+        time.sleep(0.2)
+
+    def generate():
+        header = ["Name","Father","Roll No","School","Total"] + [s.title() for s in SUBJECTS]
+        yield ",".join(header) + "\n"
+
+        for r in results:
+            row = [
+                r["name"],
+                r["father"],
+                r["roll_no"],
+                r["school"],
+                r["total"]
+            ]
+
+            for s in SUBJECTS:
+                row.append(r["subjects"].get(s, ""))
+
+            # safer CSV (handles commas)
+            yield ",".join(f'"{x}"' for x in row) + "\n"
+
+    return Response(generate(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=results.csv"}
+    )
 
 # ================= RUN =================
 if __name__ == "__main__":
