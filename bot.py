@@ -3,12 +3,17 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import time
+from io import BytesIO
+
+# PDF
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 
 BASE_URL = "https://www.bsebexam.com"
 
-# ✅ Simple in-memory cache
+# cache (avoids double scraping)
 CACHE = {}
 
 # ================= SESSION =================
@@ -59,10 +64,18 @@ def fetch_result(session, token, rollcode, rollno):
     res = session.post(url, data=payload, headers=headers, timeout=20)
     soup = BeautifulSoup(res.text, "html.parser")
 
-    data = {"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
+    data = {
+        "name":"",
+        "father":"",
+        "roll_no":rollno,
+        "school":"",
+        "total":"",
+        "subjects":{}
+    }
 
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
+
         if len(cols) < 2:
             continue
 
@@ -71,12 +84,16 @@ def fetch_result(session, token, rollcode, rollno):
 
         if "student" in key and "name" in key:
             data["name"] = value
+
         elif "father" in key:
             data["father"] = value
+
         elif "school" in key:
             data["school"] = value
+
         elif "aggregate" in key:
             data["total"] = value
+
         elif len(cols) >= 5:
             norm = normalize_subject(cols[0])
             if norm:
@@ -90,6 +107,7 @@ def home():
     return render_template_string("""
 <html>
 <head>
+<title>BSEB Result Portal</title>
 <style>
 body{
     font-family:Arial;
@@ -99,31 +117,53 @@ body{
     align-items:center;
     height:100vh;
 }
-.box{
-    background:white;
-    padding:30px;
-    border-radius:10px;
-    text-align:center;
+
+/* Tilt watermark */
+body::before{
+    content:"BSEB RESULT";
+    position:absolute;
+    font-size:80px;
+    color:rgba(255,255,255,0.15);
+    transform:rotate(-30deg);
 }
-input,select,button{
+
+.box{
+    background:rgba(255,255,255,0.2);
+    backdrop-filter:blur(10px);
+    padding:30px;
+    border-radius:15px;
+    text-align:center;
+    color:white;
+}
+
+input,button{
     width:100%;
     padding:10px;
     margin:10px 0;
+    border:none;
+    border-radius:8px;
+}
+
+button{
+    background:#2c3e50;
+    color:white;
+    cursor:pointer;
 }
 </style>
 </head>
 <body>
 
 <div class="box">
-<h2>BSEB Result 2026</h2>
+<h2>🎓 BSEB Result 2026</h2>
+
 <form action="/view">
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Starting Roll Number" required>
-<input name="count" placeholder="Count (max 50)" value="1">
+<input name="count" value="1" placeholder="Count (max 50)">
 <button>Get Result</button>
 </form>
-</div>
 
+</div>
 </body>
 </html>
 """)
@@ -134,7 +174,6 @@ def view():
     rollcode = request.args.get("rollcode")
     rollno = request.args.get("rollno")
 
-    # ✅ limit to 50
     count = min(int(request.args.get("count", 1)), 50)
 
     session = get_session()
@@ -147,20 +186,19 @@ def view():
 
         try:
             result = fetch_result(session, token, rollcode, rn)
-        except Exception:
+        except:
             result = {
-                "name": "Error",
-                "father": "",
-                "roll_no": rn,
-                "school": "",
-                "total": "",
-                "subjects": {}
+                "name":"Error",
+                "father":"",
+                "roll_no":rn,
+                "school":"",
+                "total":"",
+                "subjects":{}
             }
 
         results.append(result)
-        time.sleep(0.4)  # safer delay
+        time.sleep(0.4)
 
-    # ✅ store in cache (no re-fetch for CSV)
     CACHE["data"] = results
 
     html = """
@@ -171,15 +209,18 @@ def view():
     table{width:100%;border-collapse:collapse;background:white;}
     th,td{border:1px solid #ddd;padding:8px;text-align:center;}
     th{background:#2c3e50;color:white;}
+    .btn{padding:10px 20px;margin:5px;border:none;color:white;border-radius:6px;}
+    .csv{background:#27ae60;}
+    .pdf{background:#e74c3c;}
     </style>
     </head>
     <body>
-    <h2 align="center">Result Sheet</h2>
-    """
 
-    html += """
-    <div style="text-align:center;margin-bottom:15px;">
-    <a href="/download"><button>Download CSV</button></a>
+    <h2 align="center">Result Sheet</h2>
+
+    <div align="center">
+    <a href="/download"><button class="btn csv">Download CSV</button></a>
+    <a href="/pdf"><button class="btn pdf">Download PDF</button></a>
     </div>
     """
 
@@ -206,7 +247,7 @@ def view():
     html += "</table></body></html>"
     return html
 
-# ================= DOWNLOAD =================
+# ================= CSV =================
 @app.route("/download")
 def download():
     results = CACHE.get("data", [])
@@ -216,7 +257,7 @@ def download():
         yield ",".join(header) + "\n"
 
         for r in results:
-            row = [r["name"], r["father"], r["roll_no"], r["school"], r["total"]]
+            row = [r["name"],r["father"],r["roll_no"],r["school"],r["total"]]
             for s in SUBJECTS:
                 row.append(r["subjects"].get(s,""))
 
@@ -225,6 +266,66 @@ def download():
     return Response(generate(),
         mimetype="text/csv",
         headers={"Content-Disposition":"attachment; filename=results.csv"}
+    )
+
+# ================= PDF =================
+@app.route("/pdf")
+def pdf():
+    results = CACHE.get("data", [])
+
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+
+    width, height = letter
+    y = height - 40
+
+    # Title
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(200, y, "BSEB Result Sheet")
+    y -= 25
+
+    # Headers
+    p.setFont("Helvetica-Bold", 8)
+    headers = ["Name","Father","Roll","Total"] + [s[:4].upper() for s in SUBJECTS]
+
+    x_positions = [40, 120, 200, 250, 300, 340, 380, 420, 460, 500]
+
+    for i, h in enumerate(headers):
+        if i < len(x_positions):
+            p.drawString(x_positions[i], y, h)
+
+    y -= 15
+
+    # Data rows
+    p.setFont("Helvetica", 7)
+
+    for r in results:
+        if y < 40:
+            p.showPage()
+            y = height - 40
+
+        row = [
+            r["name"][:10],
+            r["father"][:10],
+            r["roll_no"],
+            r["total"]
+        ]
+
+        for s in SUBJECTS:
+            row.append(r["subjects"].get(s,"")[:5])
+
+        for i, val in enumerate(row):
+            if i < len(x_positions):
+                p.drawString(x_positions[i], y, str(val))
+
+        y -= 15
+
+    p.save()
+    buffer.seek(0)
+
+    return Response(buffer,
+        mimetype='application/pdf',
+        headers={"Content-Disposition":"attachment; filename=results.pdf"}
     )
 
 # ================= RUN =================
