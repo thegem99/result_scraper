@@ -34,7 +34,7 @@ def normalize_subject(name):
 
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
-    payload = {"rollcode": rollcode,"rollno": rollno,"captcha":"123456","__RequestVerificationToken": token}
+    payload = {"rollcode": rollcode,"rollno":rollno,"captcha":"123456","__RequestVerificationToken": token}
     headers = {"User-Agent":"Mozilla/5.0","Origin":BASE_URL,"Referer":BASE_URL+"/","Content-Type":"application/x-www-form-urlencoded"}
     res = session.post(url,data=payload,headers=headers,timeout=20)
     soup = BeautifulSoup(res.text,"html.parser")
@@ -63,7 +63,7 @@ def home():
 <title>BSEB Result Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;justify-content:center;align-items:center;overflow:hidden;color:white;}
+body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:#1e1e2f;overflow:hidden;color:white;display:flex;justify-content:center;align-items:center;}
 .box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;animation:slideIn 1s ease-out;}
 input,button{width:100%;padding:12px;margin:10px 0;border-radius:6px;border:none;outline:none;font-weight:bold;transition:0.3s;}
 input{border:2px solid #764ba2;}
@@ -72,27 +72,33 @@ button{background:linear-gradient(90deg,#667eea,#764ba2);color:white;cursor:poin
 button:hover{transform:scale(1.05);}
 @keyframes slideIn{from{opacity:0; transform:translateY(-50px);}to{opacity:1; transform:translateY(0);}}
 h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
+#particles-js{position:absolute;width:100%;height:100%;top:0;left:0;z-index:1;}
 </style>
 </head>
 <body>
+<div id="particles-js"></div>
 <div class="box">
 <h2>BSEB Result 2026</h2>
-<form id="resultForm" action="/view" method="get" onsubmit="showSpinner()">
+<form action="/view" method="get">
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Starting Roll Number" required>
 <input name="count" placeholder="Count (max 100)" value="1">
 <button type="submit">Get Result</button>
 </form>
 </div>
-
-<!-- Spinner overlay -->
-<div id="spinner-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center;">
-    <div style="border:8px solid #f3f3f3;border-top:8px solid #667eea;border-radius:50%;width:60px;height:60px;animation:spin 1s linear infinite;"></div>
-</div>
-
-<style>@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}</style>
+<script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
 <script>
-function showSpinner(){document.getElementById('spinner-overlay').style.display='flex';}
+particlesJS("particles-js",{
+  "particles":{
+    "number":{"value":60},
+    "size":{"value":3},
+    "move":{"speed":2},
+    "line_linked":{"enable":true}
+  },
+  "interactivity":{
+    "events":{"onhover":{"enable":true,"mode":"repulse"}}
+  }
+});
 </script>
 </body>
 </html>
@@ -107,7 +113,6 @@ def view():
     session = get_session()
     results = []
 
-    # function to fetch one result
     def fetch_single(rn):
         try:
             token = get_token(session)
@@ -118,16 +123,16 @@ def view():
     roll_numbers = [str(int(rollno)+i) for i in range(count)]
 
     # Parallel fetching
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_roll = {executor.submit(fetch_single, rn): rn for rn in roll_numbers}
+        future_to_roll = {executor.submit(fetch_single,rn): rn for rn in roll_numbers}
         for future in as_completed(future_to_roll):
             results.append(future.result())
 
-    # Sort results to preserve order
-    results.sort(key=lambda x: int(x["roll_no"]))
+    # Sort to preserve order
+    results.sort(key=lambda x:int(x["roll_no"]))
     CACHE["data"] = results
 
-    # HTML output
     html = """
 <html>
 <head>
