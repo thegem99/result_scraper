@@ -3,14 +3,18 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
+import os
 import time
 
 app = Flask(__name__)
 
-# ================= GLOBAL BROWSER (IMPORTANT FIX) =================
+# ================= CHROME SETUP (RAILWAY FIX) =================
 options = webdriver.ChromeOptions()
+
+# IMPORTANT: Railway chromium path
+options.binary_location = "/usr/bin/chromium"
+
 options.add_argument("--headless=new")
 options.add_argument("--no-sandbox")
 options.add_argument("--disable-dev-shm-usage")
@@ -18,11 +22,11 @@ options.add_argument("--disable-gpu")
 options.add_argument("--window-size=1920,1080")
 
 driver = webdriver.Chrome(
-    service=Service(ChromeDriverManager().install()),
+    service=Service("/usr/bin/chromedriver"),
     options=options
 )
 
-wait = WebDriverWait(driver, 15)
+wait = WebDriverWait(driver, 20)
 
 
 # ================= SCRAPER =================
@@ -30,22 +34,29 @@ def get_result(rollcode, roll_no):
     try:
         driver.get("https://www.bsebexam.com/")
 
+        # wait for captcha
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha')?.dataset?.value"
         ))
-
 
         captcha = driver.execute_script(
             "return document.getElementById('generatedCaptcha').dataset.value"
         )
 
-        # fill form using JS (avoids interactable issues)
-        driver.execute_script("document.getElementById('rollcode').value = arguments[0];", rollcode)
-        driver.execute_script("document.getElementById('rollno').value = arguments[0];", roll_no)
-        driver.execute_script("document.getElementById('captchaInput').value = arguments[0];", captcha)
+        # fill form (JS to avoid interactable issues)
+        driver.execute_script(
+            "document.getElementById('rollcode').value = arguments[0];", rollcode
+        )
+        driver.execute_script(
+            "document.getElementById('rollno').value = arguments[0];", roll_no
+        )
+        driver.execute_script(
+            "document.getElementById('captchaInput').value = arguments[0];", captcha
+        )
 
         driver.execute_script("document.getElementById('resultForm').submit();")
 
+        time.sleep(2)  # allow page load
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
 
@@ -85,19 +96,23 @@ def get_result(rollcode, roll_no):
         return result
 
     except Exception as e:
-        return {"roll_no": roll_no, "error": str(e)}
+        return {
+            "roll_no": roll_no,
+            "error": str(e)
+        }
 
 
 # ================= API =================
 @app.route("/batch", methods=["GET"])
 def batch():
-
     rollcode = request.args.get("rollcode")
     start = request.args.get("start")
     count = request.args.get("count")
 
     if not rollcode or not start or not count:
-        return jsonify({"error": "rollcode, start, count required"})
+        return jsonify({
+            "error": "rollcode, start, count required"
+        })
 
     start = int(start)
     count = int(count)
@@ -106,7 +121,7 @@ def batch():
 
     for i in range(count):
         roll_no = str(start + i)
-        print(f"Fetching {roll_no}")
+        print("Fetching:", roll_no)
 
         data = get_result(rollcode, roll_no)
         results.append(data)
@@ -114,16 +129,30 @@ def batch():
     return jsonify(results)
 
 
+# ================= HEALTH CHECK =================
+@app.route("/")
+def home():
+    return {"status": "API running"}
+
+
 # ================= CLEAN SHUTDOWN =================
-@app.route("/shutdown", methods=["GET"])
+@app.route("/shutdown")
 def shutdown():
-    driver.quit()
-    return {"message": "Browser closed"}
+    try:
+        driver.quit()
+    except:
+        pass
+    return {"message": "browser closed"}
 
 
 # ================= RUN =================
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+
     try:
-        app.run(host="0.0.0.0", port=5000)
+        app.run(host="0.0.0.0", port=port)
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except:
+            pass
