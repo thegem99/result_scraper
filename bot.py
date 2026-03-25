@@ -63,8 +63,9 @@ def home():
 <title>BSEB Result Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;justify-content:center;align-items:center;overflow:hidden;color:white;}
-.box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;animation:slideIn 1s ease-out;}
+body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:#1e1e2f;overflow:hidden;color:white;display:flex;justify-content:center;align-items:center;}
+#particles-js{position:absolute;width:100%;height:100%;top:0;left:0;z-index:1;}
+.box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;position:relative;z-index:2;animation:slideIn 1s ease-out;}
 input,button{width:100%;padding:12px;margin:10px 0;border-radius:6px;border:none;outline:none;font-weight:bold;transition:0.3s;}
 input{border:2px solid #764ba2;}
 input:focus{border-color:#ff4d6d;box-shadow:0 0 10px rgba(255,77,109,0.5);}
@@ -75,6 +76,7 @@ h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
 </style>
 </head>
 <body>
+<div id="particles-js"></div>
 <div class="box">
 <h2>BSEB Result 2026</h2>
 <form action="/view">
@@ -84,6 +86,13 @@ h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
 <button type="submit">Get Result</button>
 </form>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
+<script>
+particlesJS("particles-js",{
+  "particles":{"number":{"value":60},"size":{"value":3},"move":{"speed":2},"line_linked":{"enable":true}},
+  "interactivity":{"events":{"onhover":{"enable":true,"mode":"repulse"}}}
+});
+</script>
 </body>
 </html>
 """)
