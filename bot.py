@@ -34,47 +34,56 @@ def fetch_result(session, token, rollcode, rollno):
         "__RequestVerificationToken": token
     }
 
-    res = session.post(url, data=payload, timeout=20)
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Origin": BASE_URL,
+        "Referer": BASE_URL + "/",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    res = session.post(url, data=payload, headers=headers, timeout=20)
     soup = BeautifulSoup(res.text, "html.parser")
 
     data = {
-        "roll_no": rollno,
         "name": "",
         "father": "",
+        "roll_no": rollno,
         "school": "",
         "total": "",
         "subjects": {}
     }
 
-    # Extract all text
-    text = soup.get_text()
+    text = soup.get_text(" ", strip=True)
 
-    # Basic extraction (can improve later)
+    # -----------------------------
+    # BASIC EXTRACTION (SAFE)
+    # -----------------------------
     if "Name" in text:
         data["name"] = text
 
-    # Parse tables
     for table in soup.find_all("table"):
         for row in table.find_all("tr"):
             cols = [c.text.strip() for c in row.find_all(["td", "th"])]
 
             if len(cols) == 2:
-                key, val = cols
+                k, v = cols
 
-                if "Father" in key:
-                    data["father"] = val
-                elif "School" in key:
-                    data["school"] = val
-                elif "Total" in key:
-                    data["total"] = val
+                k_low = k.lower()
+
+                if "father" in k_low:
+                    data["father"] = v
+                elif "school" in k_low:
+                    data["school"] = v
+                elif "total" in k_low:
+                    data["total"] = v
                 else:
-                    data["subjects"][key] = val
+                    data["subjects"][k] = v
 
     return data
 
 
 # -----------------------------
-# HOME PAGE (FORM)
+# HOME PAGE
 # -----------------------------
 @app.route("/")
 def home():
@@ -82,32 +91,35 @@ def home():
 <!DOCTYPE html>
 <html>
 <head>
-<title>BSEB Result Portal</title>
+<title>Result Portal</title>
 <style>
-body {
-    font-family: Arial;
-    background: linear-gradient(135deg,#667eea,#764ba2);
-    color:white;
+body{
+    font-family:Arial;
+    background:linear-gradient(135deg,#667eea,#764ba2);
     text-align:center;
+    color:white;
 }
-.box {
+
+.box{
     background:white;
     color:black;
-    padding:20px;
-    margin:50px auto;
     width:350px;
-    border-radius:10px;
+    margin:50px auto;
+    padding:20px;
+    border-radius:12px;
 }
-input, select {
+
+input,select,button{
     width:90%;
     padding:10px;
     margin:10px;
 }
-button {
-    padding:10px;
-    width:95%;
+
+button{
     background:black;
     color:white;
+    border:none;
+    cursor:pointer;
 }
 </style>
 </head>
@@ -122,9 +134,9 @@ button {
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Roll Number" required>
 
-<select name="mode" id="mode" onchange="toggleCount()">
-<option value="single">Single</option>
-<option value="batch">Batch</option>
+<select name="mode" id="mode" onchange="toggle()">
+    <option value="single">Single</option>
+    <option value="batch">Batch</option>
 </select>
 
 <input name="count" id="count" value="1">
@@ -135,18 +147,18 @@ button {
 </div>
 
 <script>
-function toggleCount(){
+function toggle(){
     let mode = document.getElementById("mode").value;
-    let count = document.getElementById("count");
+    let c = document.getElementById("count");
 
     if(mode === "single"){
-        count.value = 1;
-        count.readOnly = true;
+        c.value = 1;
+        c.readOnly = true;
     } else {
-        count.readOnly = false;
+        c.readOnly = false;
     }
 }
-toggleCount();
+toggle();
 </script>
 
 </body>
@@ -155,51 +167,122 @@ toggleCount();
 
 
 # -----------------------------
-# RESULT PAGE
+# RESULT TABLE PAGE
 # -----------------------------
 @app.route("/view")
 def view():
     rollcode = request.args.get("rollcode")
     rollno = request.args.get("rollno")
-    mode = request.args.get("mode")
     count = int(request.args.get("count", 1))
 
     session = get_session()
     token = get_token(session)
 
     results = []
+    all_subjects = set()
 
+    # -----------------------------
+    # FETCH DATA
+    # -----------------------------
     for i in range(count):
         rn = str(int(rollno) + i)
+
         data = fetch_result(session, token, rollcode, rn)
         results.append(data)
-        time.sleep(0.5)
 
-    # Render results
+        for s in data["subjects"]:
+            all_subjects.add(s)
+
+        time.sleep(0.3)
+
+    subjects = sorted(list(all_subjects))
+
+    # -----------------------------
+    # TABLE UI
+    # -----------------------------
     html = """
-    <html><body style='font-family:Arial;background:#f5f5f5'>
-    <h2 style='text-align:center'>Result</h2>
-    """
+<html>
+<head>
+<style>
+body{
+    font-family:Arial;
+    background:#f4f6f9;
+    padding:20px;
+}
 
+h2{
+    text-align:center;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    background:white;
+}
+
+th,td{
+    border:1px solid #ddd;
+    padding:8px;
+    text-align:center;
+    font-size:13px;
+}
+
+th{
+    background:#2c3e50;
+    color:white;
+    position:sticky;
+    top:0;
+}
+
+tr:nth-child(even){
+    background:#f9f9f9;
+}
+</style>
+</head>
+
+<body>
+
+<h2>BSEB Result Sheet</h2>
+
+<table>
+
+<tr>
+<th>Name</th>
+<th>Father Name</th>
+<th>Roll No</th>
+<th>School</th>
+<th>Total Marks</th>
+"""
+
+    # SUBJECT HEADERS
+    for s in subjects:
+        html += f"<th>{s}</th>"
+
+    html += "</tr>"
+
+    # -----------------------------
+    # ROWS
+    # -----------------------------
     for r in results:
-        html += f"""
-        <div style='background:white;padding:20px;margin:20px;border-radius:10px'>
-        <h3>Roll No: {r['roll_no']}</h3>
-        <p><b>Name:</b> {r['name']}</p>
-        <p><b>Father:</b> {r['father']}</p>
-        <p><b>School:</b> {r['school']}</p>
-        <p><b>Total:</b> {r['total']}</p>
+        html += "<tr>"
 
-        <h4>Subjects</h4>
-        <table border="1" width="100%" cellpadding="5">
-        """
+        html += f"<td>{r['name']}</td>"
+        html += f"<td>{r['father']}</td>"
+        html += f"<td>{r['roll_no']}</td>"
+        html += f"<td>{r['school']}</td>"
+        html += f"<td>{r['total']}</td>"
 
-        for k, v in r["subjects"].items():
-            html += f"<tr><td>{k}</td><td>{v}</td></tr>"
+        for s in subjects:
+            html += f"<td>{r['subjects'].get(s, '')}</td>"
 
-        html += "</table></div>"
+        html += "</tr>"
 
-    html += "</body></html>"
+    html += """
+</table>
+
+</body>
+</html>
+"""
 
     return html
 
