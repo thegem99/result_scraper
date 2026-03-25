@@ -5,23 +5,9 @@ import os
 
 app = Flask(__name__)
 
-# ================= PLAYWRIGHT INIT =================
-playwright = sync_playwright().start()
-
-browser = playwright.chromium.launch(
-    headless=True,
-    args=[
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu"
-    ]
-)
-
-context = browser.new_context()
-
 
 # ================= SCRAPER =================
-def get_result(page, rollcode, roll_no):
+def fetch_result(page, rollcode, roll_no):
     try:
         page.goto("https://www.bsebexam.com/", timeout=60000)
 
@@ -38,54 +24,66 @@ def get_result(page, rollcode, roll_no):
 
         page.click("#resultForm button[type='submit']")
 
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(4000)
 
         soup = BeautifulSoup(page.content(), "html.parser")
 
-        result = {
+        data = {
             "roll_no": roll_no,
             "student_name": None,
             "aggregate_marks": None,
             "subjects": {}
         }
 
-        # ================= BASIC INFO =================
+        # ---- BASIC INFO ----
         for td in soup.find_all("td"):
             text = td.get_text(strip=True)
 
             if text == "Student's Name":
-                next_td = td.find_next_sibling("td")
-                if next_td:
-                    result["student_name"] = next_td.get_text(strip=True)
+                nxt = td.find_next_sibling("td")
+                if nxt:
+                    data["student_name"] = nxt.get_text(strip=True)
 
-            elif text == "Aggregate Marks:":
-                next_td = td.find_next_sibling("td")
-                if next_td:
-                    result["aggregate_marks"] = next_td.get_text(strip=True)
+            if text == "Aggregate Marks:":
+                nxt = td.find_next_sibling("td")
+                if nxt:
+                    data["aggregate_marks"] = nxt.get_text(strip=True)
 
-        # ================= SUBJECT MARKS =================
+        # ---- SUBJECTS ----
         table = soup.find("table", {"class": "text_center"})
 
         if table:
-            for row in table.find_all("tr")[3:]:
-                cells = row.find_all("td")
+            rows = table.find_all("tr")[3:]
+            for row in rows:
+                cols = row.find_all("td")
 
-                if len(cells) >= 8:
-                    subject = cells[0].get_text(strip=True)
+                if len(cols) >= 8:
+                    subject = cols[0].get_text(strip=True)
 
-                    result["subjects"][subject] = {
-                        "theory": cells[3].get_text(strip=True),
-                        "practical": cells[4].get_text(strip=True),
-                        "total": cells[7].get_text(strip=True)
+                    data["subjects"][subject] = {
+                        "theory": cols[3].get_text(strip=True),
+                        "practical": cols[4].get_text(strip=True),
+                        "total": cols[7].get_text(strip=True)
                     }
 
-        return result
+        return data
 
     except Exception as e:
         return {
             "roll_no": roll_no,
             "error": str(e)
         }
+
+
+# ================= PLAYWRIGHT INIT =================
+playwright = sync_playwright().start()
+
+browser = playwright.chromium.launch(
+    headless=True,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
+)
+
+context = browser.new_context()
 
 
 # ================= API =================
@@ -95,8 +93,8 @@ def batch():
     start = request.args.get("start")
     count = request.args.get("count")
 
-    if not rollcode or not start or not count:
-        return jsonify({"error": "rollcode, start, count required"})
+    if not all([rollcode, start, count]):
+        return jsonify({"error": "missing parameters"}), 400
 
     start = int(start)
     count = int(count)
@@ -105,33 +103,20 @@ def batch():
 
     for i in range(count):
         roll_no = str(start + i)
-        print("Fetching:", roll_no)
 
         page = context.new_page()
-        data = get_result(page, rollcode, roll_no)
+        result = fetch_result(page, rollcode, roll_no)
         page.close()
 
-        results.append(data)
+        results.append(result)
 
     return jsonify(results)
 
 
-# ================= HEALTH =================
+# ================= HOME =================
 @app.route("/")
 def home():
-    return {"status": "running", "mode": "playwright"}
-
-
-# ================= CLEAN SHUTDOWN =================
-@app.route("/shutdown")
-def shutdown():
-    try:
-        context.close()
-        browser.close()
-        playwright.stop()
-    except:
-        pass
-    return {"message": "shutdown complete"}
+    return {"status": "running"}
 
 
 # ================= RUN =================
