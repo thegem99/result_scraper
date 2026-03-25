@@ -124,7 +124,7 @@ def view():
 
     # Parallel fetching
     from concurrent.futures import ThreadPoolExecutor, as_completed
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=min(count,100)) as executor:
         future_to_roll = {executor.submit(fetch_single,rn): rn for rn in roll_numbers}
         for future in as_completed(future_to_roll):
             results.append(future.result())
