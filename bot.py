@@ -22,7 +22,11 @@ def get_token(session):
     return token.get("value") if token else None
 
 
-# ================= CLEAN RESULT PARSER =================
+# ================= CLEAN SUBJECT LIST =================
+SUBJECTS = ["english", "hindi", "physics", "chemistry", "mathematics", "math"]
+
+
+# ================= FETCH RESULT =================
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
 
@@ -52,16 +56,17 @@ def fetch_result(session, token, rollcode, rollno):
         "subjects": {}
     }
 
-    # ================= FIELD EXTRACTION =================
+    # ================= PARSE CLEAN TABLE ROWS =================
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
 
         if len(cols) < 2:
             continue
 
-        key = cols[0].lower()
-        value = cols[-1]
+        key = cols[0].lower().strip()
+        value = cols[-1].strip()
 
+        # ================= BASIC INFO =================
         if "student" in key and "name" in key:
             data["name"] = value
 
@@ -74,24 +79,23 @@ def fetch_result(session, token, rollcode, rollno):
         elif "aggregate" in key:
             data["total"] = value
 
-        # ignore noise rows
+        # ================= IGNORE NOISE =================
         elif any(x in key for x in [
             "print", "back", "copy", "web",
             "bihar school examination board",
             "intermediate", "result",
             "roll code", "roll number",
-            "registration"
+            "registration",
+            "grace", "swapping", "regulation"
         ]):
             continue
 
-        # subject detection
+        # ================= SUBJECT MARKS =================
         elif len(cols) >= 5:
             subject = cols[0].strip()
 
-            if subject and subject not in [
-                "Subject", "Marks Details"
-            ]:
-                data["subjects"][subject] = cols[-1]
+            if subject:
+                data["subjects"][subject] = value
 
     return data
 
@@ -195,22 +199,13 @@ def view():
     token = get_token(session)
 
     results = []
-    all_subjects = set()
 
     for i in range(count):
         rn = str(int(rollno) + i)
-
-        data = fetch_result(session, token, rollcode, rn)
-        results.append(data)
-
-        for s in data["subjects"]:
-            all_subjects.add(s)
-
+        results.append(fetch_result(session, token, rollcode, rn))
         time.sleep(0.2)
 
-    subjects = sorted(list(all_subjects))
-
-    # ================= HTML TABLE =================
+    # ================= HTML =================
     html = """
 <html>
 <head>
@@ -258,7 +253,7 @@ tr:hover{
 
 <body>
 
-<h2>BSEB Result Sheet</h2>
+<h2>BSEB Clean Result Sheet</h2>
 
 <table>
 
@@ -270,11 +265,13 @@ tr:hover{
 <th>Total Marks</th>
 """
 
-    for s in subjects:
-        html += f"<th>{s}</th>"
+    # SUBJECT HEADERS (FIXED ONLY)
+    for s in SUBJECTS:
+        html += f"<th>{s.title()}</th>"
 
     html += "</tr>"
 
+    # ================= ROWS =================
     for r in results:
         html += "<tr>"
 
@@ -284,8 +281,15 @@ tr:hover{
         html += f"<td>{r['school']}</td>"
         html += f"<td>{r['total']}</td>"
 
-        for s in subjects:
-            html += f"<td>{r['subjects'].get(s, '')}</td>"
+        for s in SUBJECTS:
+            value = ""
+
+            for k, v in r["subjects"].items():
+                if s in k.lower():
+                    value = v
+                    break
+
+            html += f"<td>{value}</td>"
 
         html += "</tr>"
 
