@@ -92,7 +92,7 @@ body {
     text-align: center;
     width: 400px;
     animation: slideIn 1s ease-out;
-    position: relative;   /* ensure it's above the particles */
+    position: relative;
     z-index: 2;
 }
 input, button {
@@ -161,7 +161,7 @@ particlesJS("particles-js", {
 </html>
 """)
 
-# ===== VIEW PAGE WITH PARALLEL FETCH =====
+# ===== VIEW PAGE WITH SEARCH =====
 @app.route("/view")
 def view():
     rollcode = request.args.get("rollcode")
@@ -198,15 +198,17 @@ th{background:#764ba2;position:sticky;top:0;}
 tr:hover{background:#3d3d5c;transform:scale(1.01);}
 button{padding:10px 20px;margin:10px;background:linear-gradient(90deg,#667eea,#764ba2);border:none;border-radius:6px;color:white;cursor:pointer;transition:0.3s;}
 button:hover{transform:scale(1.05);}
+input#searchInput{padding:8px;width:250px;margin-bottom:10px;border-radius:5px;border:none;outline:none;}
 </style>
 </head>
 <body>
 <h2 align="center">Result Sheet</h2>
 <div style="text-align:center;margin-bottom:15px;">
+<input type="text" id="searchInput" placeholder="Search Name / Roll No / School">
 <a href="/download"><button>Download CSV</button></a>
 <a href="/pdf"><button>Download PDF</button></a>
 </div>
-<table><tr>
+<table id="resultTable"><tr>
 """
     headers = ["Name","Father","Roll No","School","Total"]+[s.title() for s in SUBJECTS]
     for h in headers: html+=f"<th>{h}</th>"
@@ -217,7 +219,23 @@ button:hover{transform:scale(1.05);}
         html+=f"<td>{r['name']}</td><td>{r['father']}</td><td>{r['roll_no']}</td><td>{r['school']}</td><td>{r['total']}</td>"
         for s in SUBJECTS: html+=f"<td>{r['subjects'].get(s,'')}</td>"
         html+="</tr>"
-    html+="</table></body></html>"
+    html+="</table>"
+
+    # Add JS for search/filter
+    html+="""
+<script>
+document.getElementById('searchInput').addEventListener('keyup', function() {
+    let filter = this.value.toLowerCase();
+    let rows = document.querySelectorAll('#resultTable tr');
+    for (let i = 1; i < rows.length; i++) { // skip header
+        let text = rows[i].innerText.toLowerCase();
+        rows[i].style.display = text.includes(filter) ? '' : 'none';
+    }
+});
+</script>
+</body>
+</html>
+"""
     return html
 
 # ===== CSV / PDF DOWNLOAD =====
