@@ -1,6 +1,5 @@
 [phases.setup]
 nixPkgs = [
-  "python311",
   "glib",
   "nss",
   "nspr",
