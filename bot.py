@@ -1,7 +1,8 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
 
 app = Flask(__name__)
 
@@ -15,40 +16,29 @@ def get_session():
 
 
 # -----------------------------
-# GET TOKEN + COOKIE
+# GET TOKEN
 # -----------------------------
 def get_token(session):
-    url = BASE_URL + "/"
-    res = session.get(url, timeout=15)
-
+    res = session.get(BASE_URL + "/", timeout=15)
     soup = BeautifulSoup(res.text, "html.parser")
 
     token_input = soup.find("input", {"name": "__RequestVerificationToken"})
-    if not token_input:
-        return None
+    if token_input:
+        return token_input.get("value")
 
-    return token_input.get("value")
+    return None
 
 
 # -----------------------------
-# FETCH RESULT
+# FETCH SINGLE RESULT
 # -----------------------------
-def fetch_result(rollcode, rollno):
-    session = get_session()
-
-    token = get_token(session)
-    if not token:
-        return {
-            "roll_no": rollno,
-            "status": "failed",
-            "error": "Token not found"
-        }
-
+def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
 
     payload = {
         "rollcode": rollcode,
         "rollno": rollno,
+        "captcha": "123456",  # dummy (frontend-only captcha)
         "__RequestVerificationToken": token
     }
 
@@ -68,20 +58,10 @@ def fetch_result(rollcode, rollno):
         "rollcode": rollcode,
         "status": "success",
         "student_name": None,
-        "aggregate_marks": None,
         "subjects": {}
     }
 
-    # -----------------------------
-    # PARSE STUDENT NAME (try multiple ways)
-    # -----------------------------
-    possible_name = soup.find(text=lambda x: x and "Name" in x)
-    if possible_name:
-        result["student_name"] = possible_name.strip()
-
-    # -----------------------------
-    # PARSE TABLE DATA
-    # -----------------------------
+    # Parse tables
     tables = soup.find_all("table")
 
     for table in tables:
@@ -91,16 +71,8 @@ def fetch_result(rollcode, rollno):
             cols = [c.text.strip() for c in row.find_all(["td", "th"])]
 
             if len(cols) >= 2:
-                key = cols[0]
-                value = cols[1]
+                result["subjects"][cols[0]] = cols[1]
 
-                # Try detect subjects
-                if key.lower() not in ["roll code", "roll no"]:
-                    result["subjects"][key] = value
-
-    # -----------------------------
-    # CHECK IF NO DATA FOUND
-    # -----------------------------
     if len(result["subjects"]) == 0:
         result["status"] = "no_data"
 
@@ -116,9 +88,16 @@ def result():
     rollno = request.args.get("rollno")
 
     if not rollcode or not rollno:
-        return jsonify({"error": "Missing rollcode or rollno"}), 400
+        return jsonify({"error": "Missing parameters"}), 400
 
-    data = fetch_result(rollcode, rollno)
+    session = get_session()
+    token = get_token(session)
+
+    if not token:
+        return jsonify({"error": "Token fetch failed"}), 500
+
+    data = fetch_result(session, token, rollcode, rollno)
+
     return jsonify(data)
 
 
@@ -136,14 +115,23 @@ def batch():
 
     start = int(start)
 
+    session = get_session()
+    token = get_token(session)
+
+    if not token:
+        return jsonify({"error": "Token fetch failed"}), 500
+
     results = []
 
     for i in range(start, start + count):
         rollno = str(i)
 
         try:
-            data = fetch_result(rollcode, rollno)
+            data = fetch_result(session, token, rollcode, rollno)
             results.append(data)
+
+            time.sleep(0.5)  # avoid blocking
+
         except Exception as e:
             results.append({
                 "roll_no": rollno,
@@ -155,15 +143,95 @@ def batch():
 
 
 # -----------------------------
-# HEALTH CHECK
+# WEB UI
 # -----------------------------
 @app.route("/")
 def home():
-    return "BSEB API Running 🚀"
+    return render_template_string("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BSEB Result Checker</title>
+    <style>
+        body {
+            font-family: Arial;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            text-align: center;
+            padding: 40px;
+            color: white;
+        }
+        .box {
+            background: white;
+            color: black;
+            padding: 20px;
+            border-radius: 10px;
+            width: 350px;
+            margin: auto;
+        }
+        input, button {
+            width: 90%;
+            padding: 10px;
+            margin: 10px;
+        }
+        button {
+            background: black;
+            color: white;
+            cursor: pointer;
+        }
+        #result {
+            margin-top: 20px;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+<div class="box">
+    <h2>BSEB Result 2026</h2>
+
+    <input id="rollcode" placeholder="Roll Code">
+    <input id="rollno" placeholder="Roll Number">
+
+    <button onclick="getResult()">Get Result</button>
+
+    <div id="result"></div>
+</div>
+
+<script>
+function getResult() {
+    let rollcode = document.getElementById("rollcode").value;
+    let rollno = document.getElementById("rollno").value;
+
+    fetch(`/result?rollcode=${rollcode}&rollno=${rollno}`)
+    .then(res => res.json())
+    .then(data => {
+        let html = "<h3>Result:</h3>";
+
+        if(data.status !== "success"){
+            html += "<p>No data found</p>";
+        } else {
+            html += `<p><b>Roll No:</b> ${data.roll_no}</p>`;
+            html += `<p><b>Roll Code:</b> ${data.rollcode}</p>`;
+
+            html += "<h4>Subjects:</h4>";
+
+            for(let key in data.subjects){
+                html += `<p>${key}: ${data.subjects[key]}</p>`;
+            }
+        }
+
+        document.getElementById("result").innerHTML = html;
+    });
+}
+</script>
+
+</body>
+</html>
+""")
 
 
 # -----------------------------
-# LOCAL RUN (IGNORED BY RAILWAY)
+# RUN
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
