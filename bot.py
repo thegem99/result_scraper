@@ -63,16 +63,72 @@ def home():
 <title>BSEB Result Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:#1e1e2f;overflow:hidden;color:white;display:flex;justify-content:center;align-items:center;}
-.box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;animation:slideIn 1s ease-out;}
-input,button{width:100%;padding:12px;margin:10px 0;border-radius:6px;border:none;outline:none;font-weight:bold;transition:0.3s;}
-input{border:2px solid #764ba2;}
-input:focus{border-color:#ff4d6d;box-shadow:0 0 10px rgba(255,77,109,0.5);}
-button{background:linear-gradient(90deg,#667eea,#764ba2);color:white;cursor:pointer;}
-button:hover{transform:scale(1.05);}
-@keyframes slideIn{from{opacity:0; transform:translateY(-50px);}to{opacity:1; transform:translateY(0);}}
-h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
-#particles-js{position:absolute;width:100%;height:100%;top:0;left:0;z-index:1;}
+body {
+    margin:0;
+    padding:0;
+    font-family:'Roboto',sans-serif;
+    height:100vh;
+    overflow:hidden;
+    color:white;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    background:#1e1e2f;
+}
+#particles-js {
+    position:absolute;
+    width:100%;
+    height:100%;
+    top:0;
+    left:0;
+    z-index:1;
+}
+.box {
+    background: rgba(255,255,255,0.95);
+    color: black;
+    padding: 40px;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    text-align: center;
+    width: 400px;
+    animation: slideIn 1s ease-out;
+    position: relative;   /* ensure it's above the particles */
+    z-index: 2;
+}
+input, button {
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border-radius: 6px;
+    border: none;
+    outline: none;
+    font-weight: bold;
+    transition: 0.3s;
+}
+input {
+    border: 2px solid #764ba2;
+}
+input:focus {
+    border-color: #ff4d6d;
+    box-shadow: 0 0 10px rgba(255,77,109,0.5);
+}
+button {
+    background: linear-gradient(90deg,#667eea,#764ba2);
+    color:white;
+    cursor:pointer;
+}
+button:hover {
+    transform: scale(1.05);
+}
+@keyframes slideIn {
+    from {opacity:0; transform:translateY(-50px);}
+    to {opacity:1; transform:translateY(0);}
+}
+h2 {
+    margin-bottom:20px;
+    text-transform:uppercase;
+    color:#764ba2;
+}
 </style>
 </head>
 <body>
@@ -86,17 +142,18 @@ h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
 <button type="submit">Get Result</button>
 </form>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
 <script>
-particlesJS("particles-js",{
-  "particles":{
-    "number":{"value":60},
-    "size":{"value":3},
-    "move":{"speed":2},
-    "line_linked":{"enable":true}
+particlesJS("particles-js", {
+  "particles": {
+    "number": {"value":60},
+    "size": {"value":3},
+    "move": {"speed":2},
+    "line_linked": {"enable":true}
   },
-  "interactivity":{
-    "events":{"onhover":{"enable":true,"mode":"repulse"}}
+  "interactivity": {
+    "events": {"onhover":{"enable":true,"mode":"repulse"}}
   }
 });
 </script>
@@ -109,7 +166,7 @@ particlesJS("particles-js",{
 def view():
     rollcode = request.args.get("rollcode")
     rollno = request.args.get("rollno")
-    count = min(int(request.args.get("count",1)),100)
+    count = min(max(int(request.args.get("count",1)),1),100)  # ensure 1 <= count <= 100
     session = get_session()
     results = []
 
@@ -122,14 +179,11 @@ def view():
 
     roll_numbers = [str(int(rollno)+i) for i in range(count)]
 
-    # Parallel fetching
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    with ThreadPoolExecutor(max_workers=min(count,100)) as executor:
+    with ThreadPoolExecutor(max_workers=min(count,10)) as executor:
         future_to_roll = {executor.submit(fetch_single,rn): rn for rn in roll_numbers}
         for future in as_completed(future_to_roll):
             results.append(future.result())
 
-    # Sort to preserve order
     results.sort(key=lambda x:int(x["roll_no"]))
     CACHE["data"] = results
 
