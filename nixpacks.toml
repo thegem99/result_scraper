@@ -1,8 +1,2 @@
 [phases.setup]
-nixPkgs = ["python311", "chromium", "chromedriver", "glib", "nss", "dbus", "atk", "at-spi2-atk", "libdrm", "mesa"]
-
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
-
-[start]
-cmd = "python bot.py"
+nixPkgs = ["chromium", "chromedriver"]
