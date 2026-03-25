@@ -8,12 +8,13 @@ app = Flask(__name__)
 
 BASE_URL = "https://www.bsebexam.com"
 
-# -----------------------------
-# SESSION + TOKEN
-# -----------------------------
+
+# ================= SESSION =================
 def get_session():
     return requests.Session()
 
+
+# ================= TOKEN =================
 def get_token(session):
     res = session.get(BASE_URL + "/", timeout=15)
     soup = BeautifulSoup(res.text, "html.parser")
@@ -21,9 +22,7 @@ def get_token(session):
     return token.get("value") if token else None
 
 
-# -----------------------------
-# FETCH RESULT
-# -----------------------------
+# ================= CLEAN RESULT PARSER =================
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
 
@@ -53,45 +52,58 @@ def fetch_result(session, token, rollcode, rollno):
         "subjects": {}
     }
 
-    text = soup.get_text(" ", strip=True)
+    # ================= FIELD EXTRACTION =================
+    for row in soup.find_all("tr"):
+        cols = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
 
-    # -----------------------------
-    # BASIC EXTRACTION (SAFE)
-    # -----------------------------
-    if "Name" in text:
-        data["name"] = text
+        if len(cols) < 2:
+            continue
 
-    for table in soup.find_all("table"):
-        for row in table.find_all("tr"):
-            cols = [c.text.strip() for c in row.find_all(["td", "th"])]
+        key = cols[0].lower()
+        value = cols[-1]
 
-            if len(cols) == 2:
-                k, v = cols
+        if "student" in key and "name" in key:
+            data["name"] = value
 
-                k_low = k.lower()
+        elif "father" in key:
+            data["father"] = value
 
-                if "father" in k_low:
-                    data["father"] = v
-                elif "school" in k_low:
-                    data["school"] = v
-                elif "total" in k_low:
-                    data["total"] = v
-                else:
-                    data["subjects"][k] = v
+        elif "school" in key:
+            data["school"] = value
+
+        elif "aggregate" in key:
+            data["total"] = value
+
+        # ignore noise rows
+        elif any(x in key for x in [
+            "print", "back", "copy", "web",
+            "bihar school examination board",
+            "intermediate", "result",
+            "roll code", "roll number",
+            "registration"
+        ]):
+            continue
+
+        # subject detection
+        elif len(cols) >= 5:
+            subject = cols[0].strip()
+
+            if subject and subject not in [
+                "Subject", "Marks Details"
+            ]:
+                data["subjects"][subject] = cols[-1]
 
     return data
 
 
-# -----------------------------
-# HOME PAGE
-# -----------------------------
+# ================= HOME PAGE =================
 @app.route("/")
 def home():
     return render_template_string("""
 <!DOCTYPE html>
 <html>
 <head>
-<title>Result Portal</title>
+<title>BSEB Result Portal</title>
 <style>
 body{
     font-family:Arial;
@@ -103,23 +115,29 @@ body{
 .box{
     background:white;
     color:black;
-    width:350px;
+    width:380px;
     margin:50px auto;
     padding:20px;
     border-radius:12px;
+    box-shadow:0 10px 20px rgba(0,0,0,0.2);
 }
 
 input,select,button{
     width:90%;
     padding:10px;
     margin:10px;
+    border:1px solid #ddd;
+    border-radius:6px;
 }
 
 button{
-    background:black;
+    background:#2c3e50;
     color:white;
-    border:none;
     cursor:pointer;
+}
+
+button:hover{
+    background:#1a252f;
 }
 </style>
 </head>
@@ -132,7 +150,7 @@ button{
 <form action="/view" method="get">
 
 <input name="rollcode" placeholder="Roll Code" required>
-<input name="rollno" placeholder="Roll Number" required>
+<input name="rollno" placeholder="Starting Roll Number" required>
 
 <select name="mode" id="mode" onchange="toggle()">
     <option value="single">Single</option>
@@ -166,9 +184,7 @@ toggle();
 """)
 
 
-# -----------------------------
-# RESULT TABLE PAGE
-# -----------------------------
+# ================= RESULT PAGE =================
 @app.route("/view")
 def view():
     rollcode = request.args.get("rollcode")
@@ -181,9 +197,6 @@ def view():
     results = []
     all_subjects = set()
 
-    # -----------------------------
-    # FETCH DATA
-    # -----------------------------
     for i in range(count):
         rn = str(int(rollno) + i)
 
@@ -193,13 +206,11 @@ def view():
         for s in data["subjects"]:
             all_subjects.add(s)
 
-        time.sleep(0.3)
+        time.sleep(0.2)
 
     subjects = sorted(list(all_subjects))
 
-    # -----------------------------
-    # TABLE UI
-    # -----------------------------
+    # ================= HTML TABLE =================
     html = """
 <html>
 <head>
@@ -218,6 +229,7 @@ table{
     width:100%;
     border-collapse:collapse;
     background:white;
+    box-shadow:0 5px 10px rgba(0,0,0,0.1);
 }
 
 th,td{
@@ -237,6 +249,10 @@ th{
 tr:nth-child(even){
     background:#f9f9f9;
 }
+
+tr:hover{
+    background:#f1f1f1;
+}
 </style>
 </head>
 
@@ -248,21 +264,17 @@ tr:nth-child(even){
 
 <tr>
 <th>Name</th>
-<th>Father Name</th>
+<th>Father</th>
 <th>Roll No</th>
 <th>School</th>
 <th>Total Marks</th>
 """
 
-    # SUBJECT HEADERS
     for s in subjects:
         html += f"<th>{s}</th>"
 
     html += "</tr>"
 
-    # -----------------------------
-    # ROWS
-    # -----------------------------
     for r in results:
         html += "<tr>"
 
@@ -287,9 +299,7 @@ tr:nth-child(even){
     return html
 
 
-# -----------------------------
-# RUN
-# -----------------------------
+# ================= RUN =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
