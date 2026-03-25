@@ -12,7 +12,7 @@ BASE_URL = "https://www.bsebexam.com"
 CACHE = {}
 SUBJECTS = ["english","hindi","physics","chemistry","mathematics","biology"]
 
-# ===== SCRAPING LOGIC =====
+# ================= SCRAPING LOGIC =================
 def get_session():
     return requests.Session()
 
@@ -34,11 +34,21 @@ def normalize_subject(name):
 
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
-    payload = {"rollcode": rollcode,"rollno": rollno,"captcha":"123456","__RequestVerificationToken": token}
-    headers = {"User-Agent":"Mozilla/5.0","Origin":BASE_URL,"Referer":BASE_URL+"/","Content-Type":"application/x-www-form-urlencoded"}
-    res = session.post(url,data=payload,headers=headers,timeout=20)
+    payload = {
+        "rollcode": rollcode,
+        "rollno": rollno,
+        "captcha": "123456",
+        "__RequestVerificationToken": token
+    }
+    headers = {
+        "User-Agent":"Mozilla/5.0",
+        "Origin": BASE_URL,
+        "Referer": BASE_URL+"/",
+        "Content-Type":"application/x-www-form-urlencoded"
+    }
+    res = session.post(url, data=payload, headers=headers, timeout=20)
     soup = BeautifulSoup(res.text,"html.parser")
-    data={"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
+    data = {"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
         if len(cols)<2: continue
@@ -53,7 +63,7 @@ def fetch_result(session, token, rollcode, rollno):
             if norm: data["subjects"][norm]=value
     return data
 
-# ===== HOME PAGE =====
+# ================= HOME PAGE =================
 @app.route("/")
 def home():
     return render_template_string("""
@@ -63,23 +73,104 @@ def home():
 <title>BSEB Result Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:#1e1e2f;overflow:hidden;color:white;display:flex;justify-content:center;align-items:center;}
-#particles-js{position:absolute;width:100%;height:100%;top:0;left:0;z-index:1;}
-.box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;position:relative;z-index:2;animation:slideIn 1s ease-out;}
-input,button{width:100%;padding:12px;margin:10px 0;border-radius:6px;border:none;outline:none;font-weight:bold;transition:0.3s;}
-input{border:2px solid #764ba2;}
-input:focus{border-color:#ff4d6d;box-shadow:0 0 10px rgba(255,77,109,0.5);}
-button{background:linear-gradient(90deg,#667eea,#764ba2);color:white;cursor:pointer;}
-button:hover{transform:scale(1.05);}
-@keyframes slideIn{from{opacity:0; transform:translateY(-50px);}to{opacity:1; transform:translateY(0);}}
-h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
+body{
+    margin:0;
+    padding:0;
+    font-family:'Roboto',sans-serif;
+    height:100vh;
+    background: linear-gradient(135deg,#667eea,#764ba2);
+    overflow:hidden;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:white;
+}
+#particles-js{
+    position:absolute;
+    width:100%;
+    height:100%;
+    top:0;
+    left:0;
+    z-index:1;
+}
+.box{
+    background: rgba(255,255,255,0.95);
+    color:black;
+    padding:40px;
+    border-radius:15px;
+    box-shadow:0 10px 40px rgba(0,0,0,0.3);
+    text-align:center;
+    width:400px;
+    z-index:2;
+    position:relative;
+    animation: slideIn 1s ease-out;
+}
+input,button{
+    width:100%;
+    padding:12px;
+    margin:10px 0;
+    border-radius:6px;
+    border:none;
+    outline:none;
+    font-weight:bold;
+    transition:0.3s;
+}
+input{
+    border:2px solid #764ba2;
+}
+input:focus{
+    border-color:#ff4d6d;
+    box-shadow:0 0 10px rgba(255,77,109,0.5);
+}
+button{
+    background: linear-gradient(90deg,#667eea,#764ba2);
+    color:white;
+    cursor:pointer;
+}
+button:hover{
+    transform:scale(1.05);
+}
+@keyframes slideIn{
+    from{opacity:0; transform:translateY(-50px);}
+    to{opacity:1; transform:translateY(0);}
+}
+h2{
+    margin-bottom:20px;
+    text-transform:uppercase;
+    color:#764ba2;
+}
+#spinner-overlay{
+    display:none;
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.6);
+    z-index:9999;
+    justify-content:center;
+    align-items:center;
+}
+.spinner{
+    border:8px solid #f3f3f3;
+    border-top:8px solid #667eea;
+    border-radius:50%;
+    width:60px;
+    height:60px;
+    animation:spin 1s linear infinite;
+}
+@keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+}
 </style>
 </head>
 <body>
 <div id="particles-js"></div>
+<div id="spinner-overlay"><div class="spinner"></div></div>
 <div class="box">
 <h2>BSEB Result 2026</h2>
-<form action="/view">
+<form action="/view" method="get" onsubmit="document.getElementById('spinner-overlay').style.display='flex';">
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Starting Roll Number" required>
 <input name="count" placeholder="Count (max 50)" value="1">
@@ -97,7 +188,7 @@ particlesJS("particles-js",{
 </html>
 """)
 
-# ===== VIEW PAGE =====
+# ================= VIEW PAGE =================
 @app.route("/view")
 def view():
     rollcode = request.args.get("rollcode")
@@ -129,18 +220,9 @@ th{background:#764ba2;position:sticky;top:0;}
 tr:hover{background:#3d3d5c;transform:scale(1.01);}
 button{padding:10px 20px;margin:10px;background:linear-gradient(90deg,#667eea,#764ba2);border:none;border-radius:6px;color:white;cursor:pointer;transition:0.3s;}
 button:hover{transform:scale(1.05);}
-#spinner-overlay{display:flex;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;justify-content:center;align-items:center;}
-.spinner{border:8px solid #f3f3f3;border-top:8px solid #667eea;border-radius:50%;width:60px;height:60px;animation:spin 1s linear infinite;}
-@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
 </style>
-<script>
-window.onload = function(){
-    document.getElementById('spinner-overlay').style.display='none';
-}
-</script>
 </head>
 <body>
-<div id="spinner-overlay"><div class="spinner"></div></div>
 <h2 align="center">Result Sheet</h2>
 <div style="text-align:center;margin-bottom:15px;">
 <a href="/download"><button>Download CSV</button></a>
@@ -161,7 +243,7 @@ window.onload = function(){
 
     return html
 
-# ===== CSV / PDF =====
+# ================= DOWNLOAD CSV =================
 @app.route("/download")
 def download():
     results = CACHE.get("data",[])
@@ -174,6 +256,7 @@ def download():
             yield ",".join(f'"{x}"' for x in row)+"\n"
     return Response(generate(),mimetype="text/csv",headers={"Content-Disposition":"attachment; filename=results.csv"})
 
+# ================= DOWNLOAD PDF =================
 @app.route("/pdf")
 def pdf():
     results = CACHE.get("data",[])
@@ -198,7 +281,7 @@ def pdf():
     buffer.seek(0)
     return Response(buffer,mimetype='application/pdf',headers={"Content-Disposition":"attachment; filename=results.pdf"})
 
-# ===== RUN =====
+# ================= RUN =================
 if __name__=="__main__":
     port=int(os.environ.get("PORT",8080))
     app.run(host="0.0.0.0",port=port)
