@@ -22,8 +22,40 @@ def get_token(session):
     return token.get("value") if token else None
 
 
-# ================= CLEAN SUBJECT LIST =================
-SUBJECTS = ["english", "hindi", "physics", "chemistry", "mathematics", "math"]
+# ================= SUBJECT NORMALIZER =================
+def normalize_subject(name):
+    name = name.lower().strip()
+
+    if "math" in name:
+        return "mathematics"
+
+    if "bio" in name:
+        return "biology"
+
+    if "physic" in name:
+        return "physics"
+
+    if "chem" in name:
+        return "chemistry"
+
+    if "english" in name:
+        return "english"
+
+    if "hindi" in name:
+        return "hindi"
+
+    return None
+
+
+# ================= SUBJECT ORDER =================
+SUBJECTS = [
+    "english",
+    "hindi",
+    "physics",
+    "chemistry",
+    "mathematics",
+    "biology"
+]
 
 
 # ================= FETCH RESULT =================
@@ -56,7 +88,7 @@ def fetch_result(session, token, rollcode, rollno):
         "subjects": {}
     }
 
-    # ================= PARSE CLEAN TABLE ROWS =================
+    # ================= PARSE TABLE =================
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
 
@@ -66,7 +98,7 @@ def fetch_result(session, token, rollcode, rollno):
         key = cols[0].lower().strip()
         value = cols[-1].strip()
 
-        # ================= BASIC INFO =================
+        # ---------------- BASIC INFO ----------------
         if "student" in key and "name" in key:
             data["name"] = value
 
@@ -79,7 +111,7 @@ def fetch_result(session, token, rollcode, rollno):
         elif "aggregate" in key:
             data["total"] = value
 
-        # ================= IGNORE NOISE =================
+        # ---------------- IGNORE NOISE ----------------
         elif any(x in key for x in [
             "print", "back", "copy", "web",
             "bihar school examination board",
@@ -90,12 +122,14 @@ def fetch_result(session, token, rollcode, rollno):
         ]):
             continue
 
-        # ================= SUBJECT MARKS =================
+        # ---------------- SUBJECTS ----------------
         elif len(cols) >= 5:
-            subject = cols[0].strip()
+            subject_raw = cols[0].strip()
 
-            if subject:
-                data["subjects"][subject] = value
+            norm = normalize_subject(subject_raw)
+
+            if norm:
+                data["subjects"][norm] = value
 
     return data
 
@@ -265,7 +299,7 @@ tr:hover{
 <th>Total Marks</th>
 """
 
-    # SUBJECT HEADERS (FIXED ONLY)
+    # ================= SUBJECT HEADERS =================
     for s in SUBJECTS:
         html += f"<th>{s.title()}</th>"
 
@@ -282,13 +316,7 @@ tr:hover{
         html += f"<td>{r['total']}</td>"
 
         for s in SUBJECTS:
-            value = ""
-
-            for k, v in r["subjects"].items():
-                if s in k.lower():
-                    value = v
-                    break
-
+            value = r["subjects"].get(s, "")
             html += f"<td>{value}</td>"
 
         html += "</tr>"
