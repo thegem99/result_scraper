@@ -8,6 +8,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
+
 BASE_URL = "https://www.bsebexam.com"
 CACHE = {}
 SUBJECTS = ["english","hindi","physics","chemistry","mathematics","biology"]
@@ -73,25 +74,63 @@ button{background:linear-gradient(90deg,#667eea,#764ba2);color:white;cursor:poin
 button:hover{transform:scale(1.05);}
 @keyframes slideIn{from{opacity:0; transform:translateY(-50px);}to{opacity:1; transform:translateY(0);}}
 h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
+
+/* ===== Spinner styles ===== */
+#spinner-overlay{
+    display:none;
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.6);
+    z-index:9999;
+    justify-content:center;
+    align-items:center;
+}
+.spinner{
+    border:8px solid #f3f3f3;
+    border-top:8px solid #667eea;
+    border-radius:50%;
+    width:60px;
+    height:60px;
+    animation:spin 1s linear infinite;
+}
+@keyframes spin{
+    0%{transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+}
 </style>
 </head>
 <body>
 <div id="particles-js"></div>
+
 <div class="box">
 <h2>BSEB Result 2026</h2>
-<form action="/view">
+<form action="/view" onsubmit="showSpinner()">
 <input name="rollcode" placeholder="Roll Code" required>
 <input name="rollno" placeholder="Starting Roll Number" required>
 <input name="count" placeholder="Count (max 50)" value="1">
 <button>Get Result</button>
 </form>
 </div>
+
+<!-- Spinner overlay -->
+<div id="spinner-overlay">
+    <div class="spinner"></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
 <script>
 particlesJS("particles-js",{
   "particles":{"number":{"value":60},"size":{"value":3},"move":{"speed":2},"line_linked":{"enable":true}},
   "interactivity":{"events":{"onhover":{"enable":true,"mode":"repulse"}}}
 });
+
+// Show spinner on form submit
+function showSpinner(){
+    document.getElementById('spinner-overlay').style.display='flex';
+}
 </script>
 </body>
 </html>
@@ -170,7 +209,6 @@ def pdf():
     p.drawString(180,y,"BSEB Result Sheet")
     y-=30
     p.setFont("Helvetica",9)
-    # table header
     p.drawString(40,y,"Roll No | Name | Total | English | Hindi | Physics | Chemistry | Mathematics | Biology")
     y-=15
     for r in results:
