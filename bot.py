@@ -8,33 +8,26 @@ import time
 
 app = Flask(__name__)
 
-# ================= CHROME SETUP =================
+# ================= ENV FIX =================
+os.environ["PATH"] += ":/usr/bin"
+
+# ================= DRIVER CREATION =================
 def create_driver():
     options = webdriver.ChromeOptions()
 
-    # Railway / Nix chromium setup
+    # Railway Chromium (from nix)
+    options.binary_location = "/usr/bin/chromium"
+
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
 
-    # IMPORTANT: DO NOT USE Selenium Manager
-    # Force system binaries from nix
-    chromedriver_path = "/usr/bin/chromedriver"
-    chromium_path = "/usr/bin/chromium"
+    # IMPORTANT: force system chromedriver
+    service = Service("/usr/bin/chromedriver")
 
-    # fallback safety (some Railway builds differ)
-    if not os.path.exists(chromedriver_path):
-        chromedriver_path = "/nix/store/*/bin/chromedriver"
-
-    if os.path.exists(chromium_path):
-        options.binary_location = chromium_path
-
-    return webdriver.Chrome(
-        service=Service(chromedriver_path),
-        options=options
-    )
+    return webdriver.Chrome(service=service, options=options)
 
 
 # ================= SCRAPER =================
@@ -46,7 +39,7 @@ def get_result(rollcode, roll_no):
 
         driver.get("https://www.bsebexam.com/")
 
-        # wait captcha
+        # wait for captcha
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha')?.dataset?.value"
         ))
@@ -55,7 +48,7 @@ def get_result(rollcode, roll_no):
             "return document.getElementById('generatedCaptcha').dataset.value"
         )
 
-        # fill form via JS (avoids interactable errors)
+        # fill form safely using JS
         driver.execute_script(
             "document.getElementById('rollcode').value = arguments[0];", rollcode
         )
@@ -152,12 +145,12 @@ def home():
     return {"status": "running"}
 
 
-# ================= DEBUG (VERY IMPORTANT) =================
+# ================= DEBUG (IMPORTANT) =================
 @app.route("/debug")
 def debug():
     return {
         "chromedriver": os.popen("which chromedriver").read(),
-        "chromium": os.popen("which chromium || which chromium-browser").read()
+        "chromium": os.popen("which chromium").read()
     }
 
 
