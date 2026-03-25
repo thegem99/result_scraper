@@ -8,24 +8,20 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
-
 BASE_URL = "https://www.bsebexam.com"
 CACHE = {}
-
 SUBJECTS = ["english","hindi","physics","chemistry","mathematics","biology"]
 
-# ================= SESSION =================
+# ======== SCRAPING LOGIC ========
 def get_session():
     return requests.Session()
 
-# ================= TOKEN =================
 def get_token(session):
     res = session.get(BASE_URL + "/", timeout=15)
     soup = BeautifulSoup(res.text, "html.parser")
     token = soup.find("input", {"name": "__RequestVerificationToken"})
     return token.get("value") if token else None
 
-# ================= SUBJECT NORMALIZER =================
 def normalize_subject(name):
     name = name.lower().strip()
     if "math" in name: return "mathematics"
@@ -36,45 +32,28 @@ def normalize_subject(name):
     if "hindi" in name: return "hindi"
     return None
 
-# ================= FETCH RESULT =================
 def fetch_result(session, token, rollcode, rollno):
     url = BASE_URL + "/Result/GetResult"
-    payload = {
-        "rollcode": rollcode,
-        "rollno": rollno,
-        "captcha": "123456",
-        "__RequestVerificationToken": token
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Origin": BASE_URL,
-        "Referer": BASE_URL + "/",
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    res = session.post(url, data=payload, headers=headers, timeout=20)
-    soup = BeautifulSoup(res.text, "html.parser")
-    data = {"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
+    payload = {"rollcode": rollcode,"rollno": rollno,"captcha":"123456","__RequestVerificationToken": token}
+    headers = {"User-Agent":"Mozilla/5.0","Origin":BASE_URL,"Referer":BASE_URL+"/","Content-Type":"application/x-www-form-urlencoded"}
+    res = session.post(url,data=payload,headers=headers,timeout=20)
+    soup = BeautifulSoup(res.text,"html.parser")
+    data={"name":"","father":"","roll_no":rollno,"school":"","total":"","subjects":{}}
     for row in soup.find_all("tr"):
         cols = [c.get_text(" ", strip=True) for c in row.find_all(["td","th"])]
-        if len(cols) < 2:
-            continue
+        if len(cols)<2: continue
         key = cols[0].lower().strip()
         value = cols[-1].strip()
-        if "student" in key and "name" in key:
-            data["name"] = value
-        elif "father" in key:
-            data["father"] = value
-        elif "school" in key:
-            data["school"] = value
-        elif "aggregate" in key:
-            data["total"] = value
-        elif len(cols) >= 5:
-            norm = normalize_subject(cols[0])
-            if norm:
-                data["subjects"][norm] = value
+        if "student" in key and "name" in key: data["name"]=value
+        elif "father" in key: data["father"]=value
+        elif "school" in key: data["school"]=value
+        elif "aggregate" in key: data["total"]=value
+        elif len(cols)>=5:
+            norm=normalize_subject(cols[0])
+            if norm: data["subjects"][norm]=value
     return data
 
-# ================= HOME PAGE =================
+# ======== HOME PAGE ========
 @app.route("/")
 def home():
     return render_template_string("""
@@ -84,67 +63,16 @@ def home():
 <title>BSEB Result Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <style>
-body{
-    margin:0;
-    padding:0;
-    font-family:'Roboto',sans-serif;
-    height:100vh;
-    background: linear-gradient(135deg,#667eea,#764ba2);
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    overflow:hidden;
-    color:white;
-}
-.box{
-    background:rgba(255,255,255,0.95);
-    color:black;
-    padding:40px;
-    border-radius:15px;
-    box-shadow:0 10px 30px rgba(0,0,0,0.2);
-    text-align:center;
-    width:380px;
-    position:relative;
-    z-index:2;
-    animation: slideIn 1s ease-out;
-}
-input,button{
-    width:100%;
-    padding:12px;
-    margin:10px 0;
-    border-radius:6px;
-    border:1px solid #ddd;
-    transition: all 0.3s;
-}
-input:focus{
-    border-color:#764ba2;
-    box-shadow:0 0 10px rgba(118,75,162,0.3);
-    outline:none;
-}
-button{
-    background:#764ba2;
-    color:white;
-    border:none;
-    cursor:pointer;
-    font-weight:bold;
-}
-button:hover{
-    background:#667eea;
-    transform: scale(1.05);
-}
-@keyframes slideIn{
-    from{opacity:0; transform: translateY(-50px);}
-    to{opacity:1; transform: translateY(0);}
-}
-/* Particle effect */
-#particles-js{
-    position:absolute;
-    width:100%;
-    height:100%;
-    top:0;
-    left:0;
-    z-index:1;
-}
+body{margin:0;padding:0;font-family:'Roboto',sans-serif;height:100vh;background:#1e1e2f;overflow:hidden;color:white;display:flex;justify-content:center;align-items:center;}
+#particles-js{position:absolute;width:100%;height:100%;top:0;left:0;z-index:1;}
+.box{background:rgba(255,255,255,0.95);color:black;padding:40px;border-radius:15px;box-shadow:0 10px 40px rgba(0,0,0,0.3);text-align:center;width:400px;position:relative;z-index:2;animation:slideIn 1s ease-out;}
+input,button{width:100%;padding:12px;margin:10px 0;border-radius:6px;border:none;outline:none;font-weight:bold;transition:0.3s;}
+input{border:2px solid #764ba2;}
+input:focus{border-color:#ff4d6d;box-shadow:0 0 10px rgba(255,77,109,0.5);}
+button{background:linear-gradient(90deg,#667eea,#764ba2);color:white;cursor:pointer;}
+button:hover{transform:scale(1.05);}
+@keyframes slideIn{from{opacity:0; transform:translateY(-50px);}to{opacity:1; transform:translateY(0);}}
+h2{margin-bottom:20px;text-transform:uppercase;color:#764ba2;}
 </style>
 </head>
 <body>
@@ -158,11 +86,10 @@ button:hover{
 <button>Get Result</button>
 </form>
 </div>
-<!-- particles.js library -->
 <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
 <script>
 particlesJS("particles-js",{
-  "particles":{"number":{"value":50},"size":{"value":3},"move":{"speed":2},"line_linked":{"enable":true}},
+  "particles":{"number":{"value":60},"size":{"value":3},"move":{"speed":2},"line_linked":{"enable":true}},
   "interactivity":{"events":{"onhover":{"enable":true,"mode":"repulse"}}}
 });
 </script>
@@ -170,38 +97,33 @@ particlesJS("particles-js",{
 </html>
 """)
 
-# ================= VIEW PAGE =================
+# ======== VIEW PAGE ========
 @app.route("/view")
 def view():
-    rollcode = request.args.get("rollcode")
-    rollno = request.args.get("rollno")
-    count = min(int(request.args.get("count", 1)), 50)
-    session = get_session()
-    results = []
-
+    rollcode=request.args.get("rollcode")
+    rollno=request.args.get("rollno")
+    count=min(int(request.args.get("count",1)),50)
+    session=get_session()
+    results=[]
     for i in range(count):
-        rn = str(int(rollno)+i)
-        token = get_token(session)  # ✅ fresh token for each roll number
-        try:
-            res = fetch_result(session, token, rollcode, rn)
-        except:
-            res = {"name":"Error","father":"","roll_no":rn,"school":"","total":"","subjects":{}}
+        rn=str(int(rollno)+i)
+        token=get_token(session)
+        try: res=fetch_result(session,token,rollcode,rn)
+        except: res={"name":"Error","father":"","roll_no":rn,"school":"","total":"","subjects":{}}
         results.append(res)
         time.sleep(0.3)
-
-    CACHE["data"] = results
-
-    html = """
+    CACHE["data"]=results
+    html="""
 <html>
 <head>
 <style>
-body{font-family:Arial;background:#f4f6f9;padding:20px;}
-table{width:100%;border-collapse:collapse;background:white;box-shadow:0 5px 15px rgba(0,0,0,0.1);}
-th,td{border:1px solid #ddd;padding:8px;text-align:center;transition:0.3s;}
-th{background:#764ba2;color:white;position:sticky;top:0;}
-tr:hover{background:#e1f0ff;transform:scale(1.01);}
-button{padding:10px 20px;margin:10px;background:#667eea;color:white;border:none;border-radius:6px;cursor:pointer;transition:0.3s;}
-button:hover{background:#764ba2;transform:scale(1.05);}
+body{font-family:Arial;background:#1e1e2f;padding:20px;color:white;}
+table{width:100%;border-collapse:collapse;background:#2c2c3e;color:white;box-shadow:0 5px 15px rgba(0,0,0,0.2);}
+th,td{border:1px solid #555;padding:8px;text-align:center;transition:0.3s;}
+th{background:#764ba2;position:sticky;top:0;}
+tr:hover{background:#3d3d5c;transform:scale(1.01);}
+button{padding:10px 20px;margin:10px;background:linear-gradient(90deg,#667eea,#764ba2);border:none;border-radius:6px;color:white;cursor:pointer;transition:0.3s;}
+button:hover{transform:scale(1.05);}
 </style>
 </head>
 <body>
@@ -212,7 +134,7 @@ button:hover{background:#764ba2;transform:scale(1.05);}
 </div>
 <table><tr>
 """
-    headers = ["Name","Father","Roll No","School","Total"]+[s.title() for s in SUBJECTS]
+    headers=["Name","Father","Roll No","School","Total"]+[s.title() for s in SUBJECTS]
     for h in headers: html+=f"<th>{h}</th>"
     html+="</tr>"
     for r in results:
@@ -223,10 +145,10 @@ button:hover{background:#764ba2;transform:scale(1.05);}
     html+="</table></body></html>"
     return html
 
-# ================= DOWNLOAD CSV =================
+# ======== DOWNLOAD CSV ========
 @app.route("/download")
 def download():
-    results = CACHE.get("data",[])
+    results=CACHE.get("data",[])
     def generate():
         header=["Name","Father","Roll No","School","Total"]+[s.title() for s in SUBJECTS]
         yield ",".join(header)+"\n"
@@ -236,30 +158,33 @@ def download():
             yield ",".join(f'"{x}"' for x in row)+"\n"
     return Response(generate(),mimetype="text/csv",headers={"Content-Disposition":"attachment; filename=results.csv"})
 
-# ================= DOWNLOAD PDF =================
+# ======== DOWNLOAD PDF ========
 @app.route("/pdf")
 def pdf():
-    results = CACHE.get("data",[])
-    buffer = BytesIO()
-    p = canvas.Canvas(buffer,pagesize=letter)
+    results=CACHE.get("data",[])
+    buffer=BytesIO()
+    p=canvas.Canvas(buffer,pagesize=letter)
     width,height=letter
     y=height-40
     p.setFont("Helvetica-Bold",16)
     p.drawString(180,y,"BSEB Result Sheet")
     y-=30
     p.setFont("Helvetica",9)
+    # table header
+    p.drawString(40,y,"Roll No | Name | Total | English | Hindi | Physics | Chemistry | Mathematics | Biology")
+    y-=15
     for r in results:
-        if y<40:
+        if y<50:
             p.showPage()
             y=height-40
-        line=f"{r['roll_no']} | {r['name']} | {r['total']}"
+        line=f"{r['roll_no']} | {r['name']} | {r['total']} | {r['subjects'].get('english','')} | {r['subjects'].get('hindi','')} | {r['subjects'].get('physics','')} | {r['subjects'].get('chemistry','')} | {r['subjects'].get('mathematics','')} | {r['subjects'].get('biology','')}"
         p.drawString(40,y,line)
         y-=15
     p.save()
     buffer.seek(0)
     return Response(buffer,mimetype='application/pdf',headers={"Content-Disposition":"attachment; filename=results.pdf"})
 
-# ================= RUN =================
+# ======== RUN ========
 if __name__=="__main__":
     port=int(os.environ.get("PORT",8080))
     app.run(host="0.0.0.0",port=port)
