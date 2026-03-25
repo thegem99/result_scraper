@@ -3,31 +3,50 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup
-import time
 import os
+import time
 
 app = Flask(__name__)
 
-# ================= GLOBAL DRIVER (RAILWAY SAFE) =================
-options = webdriver.ChromeOptions()
+# ================= CHROME SETUP =================
+def create_driver():
+    options = webdriver.ChromeOptions()
 
-# DO NOT set binary_location or chromedriver path
-options.add_argument("--headless=new")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-gpu")
-options.add_argument("--window-size=1920,1080")
+    # Railway / Nix chromium setup
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
 
-driver = webdriver.Chrome(options=options)
-wait = WebDriverWait(driver, 20)
+    # IMPORTANT: DO NOT USE Selenium Manager
+    # Force system binaries from nix
+    chromedriver_path = "/usr/bin/chromedriver"
+    chromium_path = "/usr/bin/chromium"
+
+    # fallback safety (some Railway builds differ)
+    if not os.path.exists(chromedriver_path):
+        chromedriver_path = "/nix/store/*/bin/chromedriver"
+
+    if os.path.exists(chromium_path):
+        options.binary_location = chromium_path
+
+    return webdriver.Chrome(
+        service=Service(chromedriver_path),
+        options=options
+    )
 
 
 # ================= SCRAPER =================
 def get_result(rollcode, roll_no):
+    driver = None
     try:
+        driver = create_driver()
+        wait = WebDriverWait(driver, 20)
+
         driver.get("https://www.bsebexam.com/")
 
-        # wait for captcha
+        # wait captcha
         wait.until(lambda d: d.execute_script(
             "return document.getElementById('generatedCaptcha')?.dataset?.value"
         ))
@@ -36,7 +55,7 @@ def get_result(rollcode, roll_no):
             "return document.getElementById('generatedCaptcha').dataset.value"
         )
 
-        # fill form using JS (avoids interactable issues)
+        # fill form via JS (avoids interactable errors)
         driver.execute_script(
             "document.getElementById('rollcode').value = arguments[0];", rollcode
         )
@@ -94,6 +113,13 @@ def get_result(rollcode, roll_no):
             "error": str(e)
         }
 
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+
 
 # ================= API =================
 @app.route("/batch", methods=["GET"])
@@ -120,20 +146,19 @@ def batch():
     return jsonify(results)
 
 
-# ================= HEALTH CHECK =================
+# ================= HEALTH =================
 @app.route("/")
 def home():
-    return {"status": "API running"}
+    return {"status": "running"}
 
 
-# ================= CLEAN EXIT =================
-@app.route("/shutdown")
-def shutdown():
-    try:
-        driver.quit()
-    except:
-        pass
-    return {"message": "browser closed"}
+# ================= DEBUG (VERY IMPORTANT) =================
+@app.route("/debug")
+def debug():
+    return {
+        "chromedriver": os.popen("which chromedriver").read(),
+        "chromium": os.popen("which chromium || which chromium-browser").read()
+    }
 
 
 # ================= RUN =================
